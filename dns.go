@@ -153,6 +153,9 @@ func (r *dnsResolver) Lookup(q dns.Question, hdr dns.MsgHdr, compress bool) ([]d
 		Question: []dns.Question{q},
 	}
 
+	doFirst := make(chan struct{}, 1)
+	doFirst <- struct{}{}
+
 RESOLVE:
 	for _, ns := range r.nameservers {
 		ns := ns // thread safe
@@ -160,6 +163,7 @@ RESOLVE:
 		select {
 		case <-ctx.Done():
 			break RESOLVE
+		case <-doFirst:
 		case <-time.After(r.c.DialTimeout):
 		}
 
