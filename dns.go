@@ -231,6 +231,12 @@ type DNSConfig struct {
 // resolvConfPath is the canonical location of resolv.conf.
 const resolvConfPath = "/etc/resolv.conf"
 
+// 1.1.1.1 is a public DNS resolver that makes DNS queries
+// faster and more secure.
+//
+// https://www.cloudflare.com/learning/dns/what-is-1.1.1.1/
+const fallbackNameserver = "1.1.1.1"
+
 func parseResolvConf(r io.Reader) (*DNSConfig, error) {
 	config := new(DNSConfig)
 	scanner := bufio.NewScanner(r)
@@ -246,7 +252,9 @@ func parseResolvConf(r io.Reader) (*DNSConfig, error) {
 			if err != nil {
 				return nil, fmt.Errorf("parse error in %q: %w", line, err)
 			}
-			config.Nameservers = append(config.Nameservers, addr)
+			if addr.Is4() {
+				config.Nameservers = append(config.Nameservers, addr)
+			}
 			continue
 		}
 
@@ -257,6 +265,11 @@ func parseResolvConf(r io.Reader) (*DNSConfig, error) {
 			config.SearchDomains = append(config.SearchDomains, dns.Fqdn(fqdn))
 			continue
 		}
+	}
+
+	if len(config.Nameservers) == 0 {
+		fallbackAddr := netip.MustParseAddr(fallbackNameserver)
+		config.Nameservers = append(config.Nameservers, fallbackAddr)
 	}
 	return config, nil
 }

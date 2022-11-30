@@ -16,8 +16,12 @@ func TestParseResolvConf(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			in:   "# hello",
-			want: &DNSConfig{},
+			in: "# hello",
+			want: &DNSConfig{
+				Nameservers: []netip.Addr{
+					netip.MustParseAddr(fallbackNameserver),
+				},
+			},
 		},
 		{
 			in: "nameserver 192.168.11.1",
@@ -36,8 +40,20 @@ func TestParseResolvConf(t *testing.T) {
 			},
 		},
 		{
-			in:   "# nameserver 192.168.11.1",
-			want: &DNSConfig{},
+			in: "nameserver 2001:a7ff:5f01::a",
+			want: &DNSConfig{
+				Nameservers: []netip.Addr{
+					netip.MustParseAddr(fallbackNameserver),
+				},
+			},
+		},
+		{
+			in: "# nameserver 192.168.11.1",
+			want: &DNSConfig{
+				Nameservers: []netip.Addr{
+					netip.MustParseAddr(fallbackNameserver),
+				},
+			},
 		},
 		{
 			in:      "nameserver hello",
@@ -46,12 +62,19 @@ func TestParseResolvConf(t *testing.T) {
 		{
 			in: "search vlan",
 			want: &DNSConfig{
+				Nameservers: []netip.Addr{
+					netip.MustParseAddr(fallbackNameserver),
+				},
 				SearchDomains: []string{"vlan."},
 			},
 		},
 		{
-			in:   "# search vlan",
-			want: &DNSConfig{},
+			in: "# search vlan",
+			want: &DNSConfig{
+				Nameservers: []netip.Addr{
+					netip.MustParseAddr(fallbackNameserver),
+				},
+			},
 		},
 	}
 	for _, tc := range cases {
