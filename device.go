@@ -244,6 +244,9 @@ func NewGateway(cidr string, opts ...GatewayOpts) (*Gateway, error) {
 // IPv4 returns IPv4 address.
 func (gw *Gateway) IPv4() net.IP { return gw.ipv4.To4() }
 
+// MACAddress returns MAC address.
+func (gw *Gateway) MACAddress() net.HardwareAddr { return gw.hwAddress }
+
 func createGatewayNetworkStack(ep stack.LinkEndpoint, gatewayIPv4 tcpip.Address, subnet tcpip.Subnet) (*stack.Stack, error) {
 	s, err := createBaseNetStack()
 	if err != nil {
@@ -285,6 +288,7 @@ type EthernetDevice struct {
 	ipv4      net.IP
 	closeFunc func()
 	pool      *bytePool
+	hwAddress net.HardwareAddr
 }
 
 type ethernetDeviceOpts struct {
@@ -373,6 +377,7 @@ func (gw *Gateway) NewEthernetDevice(hwAddr net.HardwareAddr, opts ...EthernetDe
 		ipv4:      deviceIPv4,
 		closeFunc: closeIfErr2,
 		pool:      gw.pool,
+		hwAddress: hwAddr,
 	}, nil
 }
 
@@ -381,6 +386,9 @@ func (dev *EthernetDevice) File() *os.File { return dev.dev }
 
 // IPv4 returns ipv4 address that you can use in the guest OS.
 func (dev *EthernetDevice) IPv4() net.IP { return dev.ipv4 }
+
+// MACAddress returns MAC address.
+func (dev *EthernetDevice) MACAddress() net.HardwareAddr { return dev.hwAddress }
 
 // Close closes this device and ethernet connection.
 func (dev *EthernetDevice) Close() error { dev.closeFunc(); return nil }
