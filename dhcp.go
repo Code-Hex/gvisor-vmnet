@@ -111,7 +111,7 @@ func (h *dhcpHandler) handlerv4(conn net.PacketConn, peer *net.UDPAddr, msg *dhc
 type leaseDB struct {
 	leases       []*lease
 	leasePointer map[string]*lease // key is net.HardwareAddr.String()
-	mu           sync.RWMutex
+	mu           sync.Mutex
 }
 
 type lease struct {
@@ -146,9 +146,10 @@ func newLeaseDB(cidr string) (*leaseDB, error) {
 // LeaseIP leases IP address to specified MAC address of the device. If already leased
 // for the specified MAC address, returns the IP address.
 func (db *leaseDB) LeaseIP(hwAddr net.HardwareAddr) (net.IP, error) {
-	db.mu.RLock()
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
 	l, ok := db.leasePointer[hwAddr.String()]
-	db.mu.RUnlock()
 	if ok {
 		return l.ipAddr.AsSlice(), nil
 	}
@@ -162,6 +163,12 @@ func (db *leaseDB) LeaseIP(hwAddr net.HardwareAddr) (net.IP, error) {
 		}
 	}
 	return nil, fmt.Errorf("IP addresses are unavailable")
+}
+
+func (db *leaseDB) getLeases() []*lease {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	return db.leases
 }
 
 func hosts(cidr string) ([]netip.Addr, error) {

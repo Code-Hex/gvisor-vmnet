@@ -218,6 +218,10 @@ func (nt *Network) tcpIncomingForward(guestIPv4 net.IP, guestPort, hostPort int)
 		hostPort,
 		guestIPv4.String(), guestPort,
 	)
+	nt.logger.Info(
+		"start relay incoming TCP forward",
+		slog.String("forward", proxy),
+	)
 
 	go func() {
 		defer ln.Close()
@@ -295,19 +299,19 @@ type LinkDevice struct {
 	pool      *bytePool
 }
 
-type ethernetDeviceOpts struct {
+type linkDeviceOpts struct {
 	SendBufferSize     int
 	TCPIncomingForward map[int]int
 }
 
-// EthernetDeviceOpts is a optional type for NewEthernetDevice.
-type EthernetDeviceOpts func(*ethernetDeviceOpts)
+// LinkDeviceOpts is a optional type for NewLinkDevice.
+type LinkDeviceOpts func(*linkDeviceOpts)
 
 // WithSendBufferSize is an option sets SO_SNDBUF size between
 // ethernet device and guest system. And sets SO_RCVBUF size
 // four times of SO_SNDBUF. the default SO_SNDBUF is 131072.
-func WithSendBufferSize(bufSize int) EthernetDeviceOpts {
-	return func(edo *ethernetDeviceOpts) {
+func WithSendBufferSize(bufSize int) LinkDeviceOpts {
+	return func(edo *linkDeviceOpts) {
 		edo.SendBufferSize = bufSize
 	}
 }
@@ -319,8 +323,8 @@ func WithSendBufferSize(bufSize int) EthernetDeviceOpts {
 // `WithTCPIncomingForward(8888, 22)` then you can ssh to the guest OS via 127.0.0.1:8888
 //
 // This option can be applied multiple times.
-func WithTCPIncomingForward(hostPort, guestPort int) EthernetDeviceOpts {
-	return func(edo *ethernetDeviceOpts) {
+func WithTCPIncomingForward(hostPort, guestPort int) LinkDeviceOpts {
+	return func(edo *linkDeviceOpts) {
 		if edo.TCPIncomingForward == nil {
 			edo.TCPIncomingForward = make(map[int]int)
 		}
@@ -329,8 +333,8 @@ func WithTCPIncomingForward(hostPort, guestPort int) EthernetDeviceOpts {
 }
 
 // NewLinkDevice creates a new link device which is connected with vmnet network.
-func (nt *Network) NewLinkDevice(hwAddr net.HardwareAddr, opts ...EthernetDeviceOpts) (*LinkDevice, error) {
-	o := ethernetDeviceOpts{
+func (nt *Network) NewLinkDevice(hwAddr net.HardwareAddr, opts ...LinkDeviceOpts) (*LinkDevice, error) {
+	o := linkDeviceOpts{
 		// net.inet.tcp.sendspace: 131072 (sysctl net.inet.tcp.sendspace)
 		SendBufferSize: 128 * 1024,
 	}

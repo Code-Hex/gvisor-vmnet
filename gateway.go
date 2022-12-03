@@ -102,10 +102,11 @@ type DHCPLease struct {
 	netip.Addr
 }
 
-// LeaseIP returns DHCP leases. If there is a HardwareAddr, it is leased.
-func (gw *Gateway) LeaseIP() []DHCPLease {
-	ret := make([]DHCPLease, len(gw.leaseDB.leases))
-	for i, v := range gw.leaseDB.leases {
+// Leases returns DHCP leases. If there is a HardwareAddr, it is leased.
+func (gw *Gateway) Leases() []DHCPLease {
+	leases := gw.leaseDB.getLeases()
+	ret := make([]DHCPLease, len(leases))
+	for i, v := range leases {
 		ret[i] = DHCPLease{
 			HardwareAddr: v.hwAddr,
 			Addr:         v.ipAddr,

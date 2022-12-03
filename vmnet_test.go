@@ -84,7 +84,7 @@ func TestNetwork_LeaseIP(t *testing.T) {
 				return
 			}
 			gw := network.Gateway()
-			got := gw.LeaseIP()
+			got := gw.Leases()
 			if len(got) != tt.wantLen {
 				t.Fatalf("want len %d but got %d", tt.wantLen, len(got))
 			}
