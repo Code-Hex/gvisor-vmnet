@@ -107,6 +107,14 @@ type Network struct {
 }
 
 // New initializes new network stack with a network gateway.
+// The first IP in the specified cidr range is treated as the gateway IP address.
+//
+// For example, assume the value specified for cidr is "192.168.127.0/24". The
+// first IP address in this range is "192.168.127.0" and last is "192.168.127.255.
+// These IP addresses are not used for assignment. Because In general the first address
+// is the network identification and the last one is the broadcast. Thus, the first IP
+// address used for assignment here is "192.168.127.1". This is for the Gateway. Subsequent
+// IP addresses will be assigned to the Link Device.
 func New(cidr string, opts ...NetworkOpts) (*Network, error) {
 	opt := &networkOpts{
 		MTU: 1500,
@@ -132,7 +140,6 @@ func New(cidr string, opts ...NetworkOpts) (*Network, error) {
 
 	gw, err := newGateway(opt.MACAddress, &gatewayOption{
 		MTU:       opt.MTU,
-		Address:   tcpip.LinkAddress(opt.MACAddress),
 		PcapFile:  opt.PcapFile,
 		Pool:      pool,
 		Logger:    opt.Logger,
@@ -283,9 +290,9 @@ func createNetworkStack(ep stack.LinkEndpoint) (*stack.Stack, error) {
 type LinkDevice struct {
 	dev       *os.File
 	ipv4      net.IP
+	hwAddress net.HardwareAddr
 	closeFunc func()
 	pool      *bytePool
-	hwAddress net.HardwareAddr
 }
 
 type ethernetDeviceOpts struct {

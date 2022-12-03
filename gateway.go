@@ -13,7 +13,6 @@ import (
 
 type gatewayOption struct {
 	MTU       uint32
-	Address   tcpip.LinkAddress
 	PcapFile  *os.File
 	Pool      *bytePool
 	Logger    *slog.Logger
@@ -44,6 +43,7 @@ func (o *gatewayOption) dnsConfigTidy(gatewayIP net.IP) error {
 	return nil
 }
 
+// Gateway is a network gateway.
 type Gateway struct {
 	ipv4      net.IP
 	hwAddress net.HardwareAddr

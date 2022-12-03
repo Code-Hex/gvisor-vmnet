@@ -176,6 +176,7 @@ func hosts(cidr string) ([]netip.Addr, error) {
 	}
 
 	// Returns ips with excluded "192.168.127.0" and "192.168.127.255" if specified "192.168.127.0/24"
+	// https://superuser.com/questions/1111437/why-cant-i-use-the-first-or-last-address-in-a-subnet
 	if len(ips) < 2 {
 		return []netip.Addr{}, nil
 	}
