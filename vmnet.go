@@ -3,6 +3,7 @@ package vmnet
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"strconv"
 
@@ -246,6 +247,24 @@ func (gw *Gateway) IPv4() net.IP { return gw.ipv4.To4() }
 
 // MACAddress returns MAC address.
 func (gw *Gateway) MACAddress() net.HardwareAddr { return gw.hwAddress }
+
+// DHCPLease is a lease info of DHCP.
+type DHCPLease struct {
+	net.HardwareAddr
+	netip.Addr
+}
+
+// LeaseIP returns DHCP leases. If there is a HardwareAddr, it is leased.
+func (gw *Gateway) LeaseIP() []DHCPLease {
+	ret := make([]DHCPLease, len(gw.leases.leases))
+	for i, v := range gw.leases.leases {
+		ret[i] = DHCPLease{
+			HardwareAddr: v.hwAddr,
+			Addr:         v.ipAddr,
+		}
+	}
+	return ret
+}
 
 func createGatewayNetworkStack(ep stack.LinkEndpoint, gatewayIPv4 tcpip.Address, subnet tcpip.Subnet) (*stack.Stack, error) {
 	s, err := createBaseNetStack()

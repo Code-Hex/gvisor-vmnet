@@ -1,8 +1,9 @@
 package vmnet
 
 import (
-	"io"
+	"log"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -49,7 +50,7 @@ type endpoint struct {
 type gatewayEndpointOption struct {
 	MTU        uint32
 	Address    tcpip.LinkAddress
-	Writer     io.Writer
+	Writer     *os.File
 	ClosedFunc func(tcpip.Address, error)
 	Pool       *bytePool
 	Logger     *slog.Logger
@@ -65,6 +66,7 @@ func newGatewayEndpoint(opts gatewayEndpointOption) (*endpoint, error) {
 		logger: opts.Logger,
 	}
 	if opts.Writer != nil {
+		log.Println(opts.Writer)
 		ep.writer = pcapgo.NewWriter(opts.Writer)
 		if err := ep.writer.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
 			return nil, err
