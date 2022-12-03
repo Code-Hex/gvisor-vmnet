@@ -14,22 +14,22 @@ import (
 	"gvisor.dev/gvisor/pkg/waiter"
 )
 
-func (gw *Gateway) setUDPForwarder() {
-	udpForwarder := udp.NewForwarder(gw.stack, func(fr *udp.ForwarderRequest) {
+func (n *Network) setUDPForwarder() {
+	udpForwarder := udp.NewForwarder(n.stack, func(fr *udp.ForwarderRequest) {
 		id := fr.ID()
 
 		// if net.ParseIP(id.LocalAddress.String()).IsPrivate() {
 		// 	return
 		// }
 
-		addAddress(gw.stack, id.LocalAddress)
+		addAddress(n.stack, id.LocalAddress)
 
 		relay := fmt.Sprintf(
 			"%s:%d <-> %s:%d",
 			id.LocalAddress.String(), id.LocalPort,
 			id.RemoteAddress.String(), id.RemotePort,
 		)
-		gw.logger.Info(
+		n.logger.Info(
 			"start UDP relay",
 			slog.String("between", relay),
 		)
@@ -37,7 +37,7 @@ func (gw *Gateway) setUDPForwarder() {
 		var wq waiter.Queue
 		ep, tcpipErr := fr.CreateEndpoint(&wq)
 		if tcpipErr != nil {
-			gw.logger.Info(
+			n.logger.Info(
 				"failed to create TCP end",
 				slog.Any("tcpiperr", tcpipErr.String()),
 				slog.String("between", relay),
@@ -64,7 +64,7 @@ func (gw *Gateway) setUDPForwarder() {
 			proxyAddr.Port = 0
 			proxyConn, err = net.ListenUDP("udp", proxyAddr)
 			if err != nil {
-				gw.logger.Warn(
+				n.logger.Warn(
 					"failed to bind local port, trying one more time with random port",
 					errAttr(err),
 					slog.Int("port", failedLocalPort),
@@ -74,9 +74,9 @@ func (gw *Gateway) setUDPForwarder() {
 			}
 		}
 
-		client := gonet.NewUDPConn(gw.stack, &wq, ep)
+		client := gonet.NewUDPConn(n.stack, &wq, ep)
 
-		ctx := slog.NewContext(context.Background(), gw.logger)
+		ctx := slog.NewContext(context.Background(), n.logger)
 		ctx, cancel := context.WithCancel(ctx)
 
 		idleTimeout := time.Minute
@@ -93,14 +93,14 @@ func (gw *Gateway) setUDPForwarder() {
 
 		go func() {
 			defer cancel()
-			gw.pool.udpRelay(ctx, client, clientAddr, proxyConn, cancel, extend) // loc <- remote
+			n.pool.udpRelay(ctx, client, clientAddr, proxyConn, cancel, extend) // loc <- remote
 		}()
 		go func() {
 			defer cancel()
-			gw.pool.udpRelay(ctx, proxyConn, remoteAddr, client, cancel, extend) // remote <- loc
+			n.pool.udpRelay(ctx, proxyConn, remoteAddr, client, cancel, extend) // remote <- loc
 		}()
 	})
-	gw.stack.SetTransportProtocolHandler(udp.ProtocolNumber, udpForwarder.HandlePacket)
+	n.stack.SetTransportProtocolHandler(udp.ProtocolNumber, udpForwarder.HandlePacket)
 }
 
 func dialUDPConn(

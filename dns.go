@@ -17,10 +17,11 @@ import (
 	"golang.org/x/sync/errgroup"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
+	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
 
-func (gw *Gateway) serveDNS4Server(laddr *tcpip.FullAddress) error {
-	conn, err := dialUDPConn(gw.stack, laddr, ipv4.ProtocolNumber)
+func (gw *Gateway) serveDNS4Server(s *stack.Stack, laddr *tcpip.FullAddress) error {
+	conn, err := dialUDPConn(s, laddr, ipv4.ProtocolNumber)
 	if err != nil {
 		return err
 	}

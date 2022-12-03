@@ -1,7 +1,6 @@
 package vmnet
 
 import (
-	"log"
 	"net"
 	"os"
 	"sync"
@@ -66,7 +65,6 @@ func newGatewayEndpoint(opts gatewayEndpointOption) (*endpoint, error) {
 		logger: opts.Logger,
 	}
 	if opts.Writer != nil {
-		log.Println(opts.Writer)
 		ep.writer = pcapgo.NewWriter(opts.Writer)
 		if err := ep.writer.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
 			return nil, err

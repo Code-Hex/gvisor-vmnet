@@ -11,11 +11,11 @@ import (
 	"gvisor.dev/gvisor/pkg/waiter"
 )
 
-func (gw *Gateway) setTCPForwarder() {
+func (n *Network) setTCPForwarder() {
 	tcpForwarder := tcp.NewForwarder(
-		gw.stack,
-		gw.tcpReceiveBufferSize,
-		gw.tcpMaxInFlight,
+		n.stack,
+		n.tcpReceiveBufferSize,
+		n.tcpMaxInFlight,
 		func(fr *tcp.ForwarderRequest) {
 			id := fr.ID()
 
@@ -23,7 +23,7 @@ func (gw *Gateway) setTCPForwarder() {
 			// 	return
 			// }
 
-			addAddress(gw.stack, id.LocalAddress)
+			addAddress(n.stack, id.LocalAddress)
 
 			relay := fmt.Sprintf(
 				"%s:%d <-> %s:%d",
@@ -34,7 +34,7 @@ func (gw *Gateway) setTCPForwarder() {
 			var wq waiter.Queue
 			ep, tcpipErr := fr.CreateEndpoint(&wq)
 			if tcpipErr != nil {
-				gw.logger.Info(
+				n.logger.Info(
 					"failed to create TCP end",
 					slog.Any("tcpiperr", tcpipErr.String()),
 					slog.String("between", relay),
@@ -49,7 +49,7 @@ func (gw *Gateway) setTCPForwarder() {
 			remoteAddr := fmt.Sprintf("%s:%d", id.LocalAddress, id.LocalPort)
 			conn, err := net.DialTimeout("tcp", remoteAddr, 5*time.Second)
 			if err != nil {
-				gw.logger.Error(
+				n.logger.Error(
 					"failed to dial TCP", err,
 					slog.String("target", remoteAddr),
 					slog.String("between", relay),
@@ -57,16 +57,16 @@ func (gw *Gateway) setTCPForwarder() {
 				return
 			}
 
-			gw.logger.Info(
+			n.logger.Info(
 				"start TCP relay",
 				slog.String("between", relay),
 			)
 
-			err = gw.pool.tcpRelay(conn, gonet.NewTCPConn(&wq, ep))
+			err = n.pool.tcpRelay(conn, gonet.NewTCPConn(&wq, ep))
 			if err != nil {
-				gw.logger.Error("failed TCP relay", err, slog.String("between", relay))
+				n.logger.Error("failed TCP relay", err, slog.String("between", relay))
 			}
 		},
 	)
-	gw.stack.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpForwarder.HandlePacket)
+	n.stack.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpForwarder.HandlePacket)
 }

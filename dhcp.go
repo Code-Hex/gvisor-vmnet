@@ -9,14 +9,22 @@ import (
 	"github.com/insomniacslk/dhcp/dhcpv4"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
+	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
 
-func (gw *Gateway) serveDHCP4Server(laddr *tcpip.FullAddress) error {
-	conn, err := dialUDPConn(gw.stack, laddr, ipv4.ProtocolNumber, func(so *tcpip.SocketOptions) {
+func (gw *Gateway) serveDHCP4Server(s *stack.Stack, subnetMask net.IPMask, laddr *tcpip.FullAddress) error {
+	conn, err := dialUDPConn(s, laddr, ipv4.ProtocolNumber, func(so *tcpip.SocketOptions) {
 		so.SetBroadcast(true)
 	})
 	if err != nil {
 		return err
+	}
+
+	h := &dhcpHandler{
+		gatewayIP:     gw.ipv4,
+		subnetMask:    subnetMask,
+		leaseDB:       gw.leaseDB,
+		searchDomains: gw.dnsConfig.SearchDomains,
 	}
 
 	go func() {
@@ -39,7 +47,7 @@ func (gw *Gateway) serveDHCP4Server(laddr *tcpip.FullAddress) error {
 			}
 
 			go func() {
-				err := gw.handlerv4(conn, peer.(*net.UDPAddr), m)
+				err := h.handlerv4(conn, peer.(*net.UDPAddr), m)
 				if err != nil {
 					gw.logger.Warn("failed to handle DHCPv4 request", errAttr(err))
 				}
@@ -49,24 +57,29 @@ func (gw *Gateway) serveDHCP4Server(laddr *tcpip.FullAddress) error {
 	return nil
 }
 
-func (gw *Gateway) handlerv4(conn net.PacketConn, peer *net.UDPAddr, msg *dhcpv4.DHCPv4) error {
-	gatewayIP := gw.ipv4
-	yourIP, err := gw.leases.LeaseIP(msg.ClientHWAddr)
+type dhcpHandler struct {
+	gatewayIP     net.IP
+	subnetMask    net.IPMask
+	leaseDB       *leaseDB
+	searchDomains []string
+}
+
+func (h *dhcpHandler) handlerv4(conn net.PacketConn, peer *net.UDPAddr, msg *dhcpv4.DHCPv4) error {
+	yourIP, err := h.leaseDB.LeaseIP(msg.ClientHWAddr)
 	if err != nil {
 		return err
 	}
-	subnetMask := net.IPMask(tcpip.Address(gw.subnet.Mask()).To4())
 
 	modifiers := []dhcpv4.Modifier{
 		dhcpv4.WithReply(msg),
-		dhcpv4.WithRouter(gatewayIP), // the default route
-		dhcpv4.WithServerIP(gatewayIP),
-		dhcpv4.WithDNS(gw.ipv4),
-		dhcpv4.WithOption(dhcpv4.OptServerIdentifier(gatewayIP)),
+		dhcpv4.WithRouter(h.gatewayIP), // the default route
+		dhcpv4.WithServerIP(h.gatewayIP),
+		dhcpv4.WithDNS(h.gatewayIP),
+		dhcpv4.WithOption(dhcpv4.OptServerIdentifier(h.gatewayIP)),
 		dhcpv4.WithYourIP(yourIP),
 		dhcpv4.WithLeaseTime(3600), // hour works
-		dhcpv4.WithNetmask(subnetMask),
-		dhcpv4.WithDomainSearchList(gw.dnsConfig.SearchDomains...),
+		dhcpv4.WithNetmask(h.subnetMask),
+		dhcpv4.WithDomainSearchList(h.searchDomains...),
 	}
 
 	switch msg.MessageType() {

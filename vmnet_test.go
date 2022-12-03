@@ -9,7 +9,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-func TestGateway_LeaseIP(t *testing.T) {
+func TestNetwork_LeaseIP(t *testing.T) {
 	gwHwAddr := net.HardwareAddr{
 		0x7a, 0x5b, 0x10, 0x21, 0x90, 0xe3,
 	}
@@ -76,13 +76,14 @@ func TestGateway_LeaseIP(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.cidr, func(t *testing.T) {
-			gw, err := vmnet.NewGateway(tt.cidr, vmnet.WithMACAddress(gwHwAddr))
+			network, err := vmnet.New(tt.cidr, vmnet.WithGatewayMACAddress(gwHwAddr))
 			if err != nil {
 				if !tt.wantErr {
 					t.Fatalf("unexpected error: %v", err)
 				}
 				return
 			}
+			gw := network.Gateway()
 			got := gw.LeaseIP()
 			if len(got) != tt.wantLen {
 				t.Fatalf("want len %d but got %d", tt.wantLen, len(got))
