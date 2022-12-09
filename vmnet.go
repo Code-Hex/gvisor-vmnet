@@ -2,6 +2,7 @@ package vmnet
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"strconv"
@@ -104,6 +105,7 @@ type Network struct {
 	tcpReceiveBufferSize int
 	gateway              *Gateway
 	logger               *slog.Logger
+	subnet               tcpip.Subnet
 }
 
 // New initializes new network stack with a network gateway.
@@ -138,6 +140,11 @@ func New(cidr string, opts ...NetworkOpts) (*Network, error) {
 
 	pool := newBytePool(int(opt.MTU))
 
+	_, subnet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return nil, err
+	}
+
 	gw, err := newGateway(opt.MACAddress, &gatewayOption{
 		MTU:       opt.MTU,
 		PcapFile:  opt.PcapFile,
@@ -145,26 +152,39 @@ func New(cidr string, opts ...NetworkOpts) (*Network, error) {
 		Logger:    opt.Logger,
 		Leases:    db,
 		DNSConfig: opt.DNSConfig,
+		Subnet:    subnet,
 	})
 	if err != nil {
 		return nil, err
 	}
 
+	tcpipSubnet, tcpipErr := tcpip.NewSubnet(
+		tcpip.Address(subnet.IP),
+		tcpip.AddressMask(subnet.Mask),
+	)
+	if tcpipErr != nil {
+		return nil, fmt.Errorf(tcpipErr.Error())
+	}
 	s, err := createNetworkStack(gw.endpoint)
 	if err != nil {
 		return nil, err
 	}
 
+	s.AddRoute(tcpip.Route{
+		Destination: tcpipSubnet,
+		NIC:         nicID,
+	})
+
 	gatewayIPv4 := tcpip.Address(gw.ipv4)
-	if err := s.AddProtocolAddress(
-		nicID,
-		tcpip.ProtocolAddress{
-			Protocol:          ipv4.ProtocolNumber,
-			AddressWithPrefix: gatewayIPv4.WithPrefix(),
-		},
-		stack.AddressProperties{},
-	); err != nil {
-		return nil, fmt.Errorf(err.String())
+	if err := addAddress(s, gatewayIPv4); err != nil {
+		return nil, err
+	}
+
+	for _, v := range []tcpip.Address{
+		tcpip.Address(net.ParseIP("192.168.127.2").To4()),
+		tcpip.Address(net.ParseIP("192.168.127.3").To4()),
+	} {
+		log.Println("testtest,", tcpipSubnet.Contains(v))
 	}
 
 	nt := &Network{
@@ -174,20 +194,16 @@ func New(cidr string, opts ...NetworkOpts) (*Network, error) {
 		tcpReceiveBufferSize: opt.TCPReceiveBufferSize,
 		logger:               opt.Logger,
 		gateway:              gw,
+		subnet:               tcpipSubnet,
 	}
 
-	_, parsedSubnet, err := net.ParseCIDR(cidr)
-	if err != nil {
-		return nil, err
-	}
-
-	err = gw.serveDHCP4Server(s, parsedSubnet.Mask, &tcpip.FullAddress{
-		NIC:  nicID,
-		Port: 67,
-	})
-	if err != nil {
-		return nil, err
-	}
+	// err = gw.serveDHCP4Server(s, parsedSubnet.Mask, &tcpip.FullAddress{
+	// 	NIC:  nicID,
+	// 	Port: 67,
+	// })
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	err = gw.serveDNS4Server(s, &tcpip.FullAddress{
 		NIC:  nicID,
@@ -253,7 +269,7 @@ func (nt *Network) tcpIncomingForward(guestIPv4 net.IP, guestPort, hostPort int)
 				}
 				defer conn1.Close()
 
-				if err := nt.pool.tcpRelay(conn, conn1); err != nil {
+				if err := nt.pool.tcpRelay(conn.(*net.TCPConn), conn1); err != nil {
 					nt.logger.Error(
 						"failed to relay the connection in incoming TCP forward", err,
 						slog.String("forward", proxy),
@@ -367,6 +383,10 @@ func (nt *Network) NewLinkDevice(hwAddr net.HardwareAddr, opts ...LinkDeviceOpts
 
 	deviceIPv4Addr := tcpip.Address(deviceIPv4.To4())
 	nt.gateway.endpoint.RegisterConn(deviceIPv4Addr, ethConn)
+
+	if err := addAddress(nt.stack, deviceIPv4Addr); err != nil {
+		log.Println("=========", err)
+	}
 
 	for hostPort, guestPort := range o.TCPIncomingForward {
 		err := nt.tcpIncomingForward(deviceIPv4, guestPort, hostPort)

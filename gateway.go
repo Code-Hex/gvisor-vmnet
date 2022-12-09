@@ -18,6 +18,7 @@ type gatewayOption struct {
 	Logger    *slog.Logger
 	Leases    *leaseDB
 	DNSConfig *DNSConfig
+	Subnet    *net.IPNet
 }
 
 func (o *gatewayOption) dnsConfigTidy(gatewayIP net.IP) error {
@@ -62,7 +63,6 @@ func newGateway(hwAddr net.HardwareAddr, opt *gatewayOption) (*Gateway, error) {
 	if err := opt.dnsConfigTidy(gatewayIP); err != nil {
 		return nil, err
 	}
-
 	ep, err := newGatewayEndpoint(gatewayEndpointOption{
 		MTU:     opt.MTU,
 		Address: tcpip.LinkAddress(hwAddr),
@@ -75,6 +75,12 @@ func newGateway(hwAddr net.HardwareAddr, opt *gatewayOption) (*Gateway, error) {
 		Writer: opt.PcapFile,
 		Pool:   opt.Pool,
 		Logger: opt.Logger,
+		DHCPv4Handler: &dhcpHandler{
+			gatewayIP:     gatewayIP,
+			subnetMask:    opt.Subnet.Mask,
+			leaseDB:       opt.Leases,
+			searchDomains: opt.DNSConfig.SearchDomains,
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create an default gateway endpoint: %w", err)

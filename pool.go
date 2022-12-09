@@ -32,11 +32,24 @@ func (b *bytePool) tcpRelay(rw1, rw2 io.ReadWriteCloser) error {
 	defer rw1.Close()
 	defer rw2.Close()
 
-	copyBuffer := func(w io.Writer, r io.Reader) error {
+	copyBuffer := func(dst io.Writer, src io.Reader) error {
 		buf := b.getBytes()
 		defer b.putBytes(buf)
 
-		_, err := io.CopyBuffer(w, r, buf)
+		defer func() {
+			if v, ok := dst.(interface {
+				CloseWrite() error
+			}); ok {
+				v.CloseWrite()
+			}
+			if v, ok := src.(interface {
+				CloseRead() error
+			}); ok {
+				v.CloseRead()
+			}
+		}()
+
+		_, err := io.CopyBuffer(dst, src, buf)
 		return err
 	}
 

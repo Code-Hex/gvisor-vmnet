@@ -2,20 +2,23 @@ package vmnet
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"time"
 
 	"golang.org/x/exp/slog"
+	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
+	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 	"gvisor.dev/gvisor/pkg/waiter"
 )
 
-func (n *Network) setTCPForwarder() {
+func (nt *Network) setTCPForwarder() {
 	tcpForwarder := tcp.NewForwarder(
-		n.stack,
-		n.tcpReceiveBufferSize,
-		n.tcpMaxInFlight,
+		nt.stack,
+		nt.tcpReceiveBufferSize,
+		nt.tcpMaxInFlight,
 		func(fr *tcp.ForwarderRequest) {
 			id := fr.ID()
 
@@ -23,7 +26,7 @@ func (n *Network) setTCPForwarder() {
 			// 	return
 			// }
 
-			addAddress(n.stack, id.LocalAddress)
+			addAddress(nt.stack, id.LocalAddress)
 
 			relay := fmt.Sprintf(
 				"%s:%d <-> %s:%d",
@@ -34,7 +37,7 @@ func (n *Network) setTCPForwarder() {
 			var wq waiter.Queue
 			ep, tcpipErr := fr.CreateEndpoint(&wq)
 			if tcpipErr != nil {
-				n.logger.Info(
+				nt.logger.Info(
 					"failed to create TCP end",
 					slog.Any("tcpiperr", tcpipErr.String()),
 					slog.String("between", relay),
@@ -47,9 +50,9 @@ func (n *Network) setTCPForwarder() {
 			ep.SocketOptions().SetKeepAlive(true)
 
 			remoteAddr := fmt.Sprintf("%s:%d", id.LocalAddress, id.LocalPort)
-			conn, err := net.DialTimeout("tcp", remoteAddr, 5*time.Second)
+			conn, err := nt.dialTCP(id.LocalAddress, id.LocalPort)
 			if err != nil {
-				n.logger.Error(
+				nt.logger.Error(
 					"failed to dial TCP", err,
 					slog.String("target", remoteAddr),
 					slog.String("between", relay),
@@ -57,16 +60,32 @@ func (n *Network) setTCPForwarder() {
 				return
 			}
 
-			n.logger.Info(
+			nt.logger.Info(
 				"start TCP relay",
 				slog.String("between", relay),
 			)
 
-			err = n.pool.tcpRelay(conn, gonet.NewTCPConn(&wq, ep))
+			err = nt.pool.tcpRelay(conn, gonet.NewTCPConn(&wq, ep))
 			if err != nil {
-				n.logger.Error("failed TCP relay", err, slog.String("between", relay))
+				nt.logger.Error("failed TCP relay", err, slog.String("between", relay))
 			}
 		},
 	)
-	n.stack.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpForwarder.HandlePacket)
+	nt.stack.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpForwarder.HandlePacket)
+}
+
+func (nt *Network) dialTCP(addr tcpip.Address, port uint16) (io.ReadWriteCloser, error) {
+	if nt.subnet.Contains(addr) {
+		return gonet.DialTCP(nt.stack, tcpip.FullAddress{
+			NIC:  nicID,
+			Addr: addr,
+			Port: port,
+		}, ipv4.ProtocolNumber)
+	}
+	remoteAddr := fmt.Sprintf("%s:%d", addr, port)
+	conn, err := net.DialTimeout("tcp", remoteAddr, 5*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	return conn.(*net.TCPConn), nil
 }

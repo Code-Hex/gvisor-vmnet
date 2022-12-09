@@ -9,6 +9,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
+	"github.com/insomniacslk/dhcp/dhcpv4"
 	"golang.org/x/exp/slog"
 	"gvisor.dev/gvisor/pkg/bufferv2"
 	"gvisor.dev/gvisor/pkg/tcpip"
@@ -44,25 +45,29 @@ type endpoint struct {
 	pool *bytePool
 
 	logger *slog.Logger
+
+	dhcpv4Handler *dhcpHandler
 }
 
 type gatewayEndpointOption struct {
-	MTU        uint32
-	Address    tcpip.LinkAddress
-	Writer     *os.File
-	ClosedFunc func(tcpip.Address, error)
-	Pool       *bytePool
-	Logger     *slog.Logger
+	MTU           uint32
+	Address       tcpip.LinkAddress
+	Writer        *os.File
+	ClosedFunc    func(tcpip.Address, error)
+	Pool          *bytePool
+	Logger        *slog.Logger
+	DHCPv4Handler *dhcpHandler
 }
 
 func newGatewayEndpoint(opts gatewayEndpointOption) (*endpoint, error) {
 	ep := &endpoint{
-		conns:  map[tcpip.Address]net.Conn{},
-		mtu:    opts.MTU,
-		closed: opts.ClosedFunc,
-		addr:   opts.Address,
-		pool:   opts.Pool,
-		logger: opts.Logger,
+		conns:         map[tcpip.Address]net.Conn{},
+		mtu:           opts.MTU,
+		closed:        opts.ClosedFunc,
+		addr:          opts.Address,
+		pool:          opts.Pool,
+		logger:        opts.Logger,
+		dhcpv4Handler: opts.DHCPv4Handler,
 	}
 	if opts.Writer != nil {
 		ep.writer = pcapgo.NewWriter(opts.Writer)
@@ -159,9 +164,8 @@ func (e *endpoint) Attach(dispatcher stack.NetworkDispatcher) {
 // them to the network stack.
 func (e *endpoint) dispatchLoop(devAddr tcpip.Address, conn net.Conn) {
 	for {
-		cont, err := e.inboundDispatch(conn)
+		cont, err := e.inboundDispatch(devAddr, conn)
 		if err != nil || !cont {
-
 			e.connmu.Lock()
 			delete(e.conns, devAddr)
 			e.connmu.Unlock()
@@ -224,7 +228,7 @@ func (e *endpoint) WritePackets(pkts stack.PacketBufferList) (written int, err t
 }
 
 // dispatch reads one packet from the file descriptor and dispatches it.
-func (e *endpoint) inboundDispatch(conn net.Conn) (bool, error) {
+func (e *endpoint) inboundDispatch(devAddr tcpip.Address, conn net.Conn) (bool, error) {
 	data := e.pool.getBytes()
 	defer e.pool.putBytes(data)
 
@@ -296,6 +300,30 @@ func (e *endpoint) deliverOrConsumeNetworkPacket(
 					ident:    icmpv4.Ident(),
 					sequence: icmpv4.Sequence(),
 				})
+				return true, nil
+			}
+		}
+	case header.UDPProtocolNumber:
+		{
+			udpv4 := header.UDP(data[header.EthernetMinimumSize+header.IPv4MinimumSize:])
+			srcPort := udpv4.SourcePort()
+			dstPort := udpv4.DestinationPort()
+			if dstPort == 67 && srcPort == 68 {
+				msg, err := dhcpv4.FromBytes(udpv4.Payload())
+				if err != nil {
+					e.logger.Warn("failed to decode DHCPv4 packet data in endpoint", errAttr(err))
+					return true, nil
+				}
+				go e.dhcpv4Handler.handleDHCPv4(conn, dhcpv4Packet{
+					srcIP:   ipv4.SourceAddress(),
+					dstIP:   ipv4.DestinationAddress(),
+					srcPort: srcPort,
+					dstPort: dstPort,
+					srcMAC:  ethHdr.SourceAddress(),
+					dstMAC:  ethHdr.DestinationAddress(),
+					msg:     msg,
+				})
+
 				return true, nil
 			}
 		}

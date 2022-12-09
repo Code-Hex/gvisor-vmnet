@@ -2,60 +2,17 @@ package vmnet
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"net/netip"
 	"sync"
 
 	"github.com/insomniacslk/dhcp/dhcpv4"
 	"gvisor.dev/gvisor/pkg/tcpip"
+	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
-	"gvisor.dev/gvisor/pkg/tcpip/stack"
+	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
 )
-
-func (gw *Gateway) serveDHCP4Server(s *stack.Stack, subnetMask net.IPMask, laddr *tcpip.FullAddress) error {
-	conn, err := dialUDPConn(s, laddr, ipv4.ProtocolNumber, func(so *tcpip.SocketOptions) {
-		so.SetBroadcast(true)
-	})
-	if err != nil {
-		return err
-	}
-
-	h := &dhcpHandler{
-		gatewayIP:     gw.ipv4,
-		subnetMask:    subnetMask,
-		leaseDB:       gw.leaseDB,
-		searchDomains: gw.dnsConfig.SearchDomains,
-	}
-
-	go func() {
-		defer conn.Close()
-
-		rbuf := gw.pool.getBytes()
-		defer gw.pool.putBytes(rbuf)
-
-		for {
-			n, peer, err := conn.ReadFrom(rbuf)
-			if err != nil {
-				gw.logger.Error("failed to read from connection in DHCPv4 server", err)
-				return
-			}
-
-			m, err := dhcpv4.FromBytes(rbuf[:n])
-			if err != nil {
-				gw.logger.Warn("failed parsing DHCPv4 request", errAttr(err))
-				continue
-			}
-
-			go func() {
-				err := h.handlerv4(conn, peer.(*net.UDPAddr), m)
-				if err != nil {
-					gw.logger.Warn("failed to handle DHCPv4 request", errAttr(err))
-				}
-			}()
-		}
-	}()
-	return nil
-}
 
 type dhcpHandler struct {
 	gatewayIP     net.IP
@@ -64,14 +21,21 @@ type dhcpHandler struct {
 	searchDomains []string
 }
 
-func (h *dhcpHandler) handlerv4(conn net.PacketConn, peer *net.UDPAddr, msg *dhcpv4.DHCPv4) error {
-	yourIP, err := h.leaseDB.LeaseIP(msg.ClientHWAddr)
+type dhcpv4Packet struct {
+	srcIP, dstIP     tcpip.Address
+	srcPort, dstPort uint16
+	srcMAC, dstMAC   tcpip.LinkAddress
+	msg              *dhcpv4.DHCPv4
+}
+
+func (h *dhcpHandler) handleDHCPv4(conn io.Writer, p dhcpv4Packet) error {
+	yourIP, err := h.leaseDB.LeaseIP(p.msg.ClientHWAddr)
 	if err != nil {
 		return err
 	}
 
 	modifiers := []dhcpv4.Modifier{
-		dhcpv4.WithReply(msg),
+		dhcpv4.WithReply(p.msg),
 		dhcpv4.WithRouter(h.gatewayIP), // the default route
 		dhcpv4.WithServerIP(h.gatewayIP),
 		dhcpv4.WithDNS(h.gatewayIP),
@@ -82,7 +46,7 @@ func (h *dhcpHandler) handlerv4(conn net.PacketConn, peer *net.UDPAddr, msg *dhc
 		dhcpv4.WithDomainSearchList(h.searchDomains...),
 	}
 
-	switch msg.MessageType() {
+	switch p.msg.MessageType() {
 	case dhcpv4.MessageTypeDiscover:
 		modifiers = append(modifiers, dhcpv4.WithMessageType(dhcpv4.MessageTypeOffer))
 	case dhcpv4.MessageTypeRequest:
@@ -94,18 +58,67 @@ func (h *dhcpHandler) handlerv4(conn net.PacketConn, peer *net.UDPAddr, msg *dhc
 		return fmt.Errorf("failed to build DHCPv4 reply message: %w", err)
 	}
 
-	// Set peer to broadcast if the client did not have an IP.
-	if peer.IP == nil || peer.IP.To4().Equal(net.IPv4zero) {
-		peer = &net.UDPAddr{
-			IP:   net.IPv4bcast,
-			Port: peer.Port,
-		}
-	}
+	packet := makeUDPv4Packet(
+		p.dstMAC,
+		p.srcMAC,
+		tcpip.Address(h.gatewayIP),
+		tcpip.Address(net.IPv4bcast),
+		p.dstPort,
+		p.srcPort,
+		dhcpReply.ToBytes(),
+	)
 
-	if _, err := conn.WriteTo(dhcpReply.ToBytes(), peer); err != nil {
-		return fmt.Errorf("dhcpv4 server reply failed: %w", err)
-	}
-	return nil
+	_, err = conn.Write(packet)
+
+	return err
+}
+
+// makeUDPv4Packet returns an UDP IPv4 packet.
+func makeUDPv4Packet(
+	srcMAC, dstMAC tcpip.LinkAddress,
+	srcIP, dstIP tcpip.Address,
+	srcPort, dstPort uint16,
+	payload []byte,
+) []byte {
+	const ethernetUDPv4MinimumSize = header.EthernetMinimumSize + header.IPv4MinimumSize + header.UDPMinimumSize
+	buf := make([]byte, ethernetUDPv4MinimumSize+len(payload))
+
+	// Ethernet header
+	eth := header.Ethernet(buf)
+	eth.Encode(&header.EthernetFields{
+		SrcAddr: srcMAC,
+		DstAddr: dstMAC,
+		Type:    ipv4.ProtocolNumber,
+	})
+
+	// IP header
+	ipbuf := buf[header.EthernetMinimumSize:]
+	ip := header.IPv4(ipbuf)
+	ip.Encode(&header.IPv4Fields{
+		TotalLength: uint16(len(ipbuf)),
+		TTL:         65,
+		Protocol:    uint8(udp.ProtocolNumber),
+		SrcAddr:     srcIP,
+		DstAddr:     dstIP,
+	})
+	ip.SetChecksum(^ip.CalculateChecksum())
+
+	// UDP header
+	udpv4buf := buf[header.EthernetMinimumSize+header.IPv4MinimumSize:]
+	udpv4 := header.UDP(udpv4buf)
+	udpv4.Encode(&header.UDPFields{
+		SrcPort: srcPort,
+		DstPort: dstPort,
+		Length:  uint16(header.UDPMinimumSize + len(payload)),
+	})
+	copy(udpv4.Payload(), payload)
+	// Calculate the UDP pseudo-header checksum.
+	xsum := header.PseudoHeaderChecksum(udp.ProtocolNumber, srcIP, dstIP, uint16(len(udpv4)))
+	// Calculate the UDP checksum and set it.
+	xsum = header.Checksum(payload, xsum)
+	udpv4.SetChecksum(^udpv4.CalculateChecksum(xsum))
+
+	return buf
 }
 
 type leaseDB struct {
