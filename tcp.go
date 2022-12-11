@@ -22,10 +22,6 @@ func (nt *Network) setTCPForwarder() {
 		func(fr *tcp.ForwarderRequest) {
 			id := fr.ID()
 
-			// if net.ParseIP(id.LocalAddress.String()).IsPrivate() {
-			// 	return
-			// }
-
 			addAddress(nt.stack, id.LocalAddress)
 
 			relay := fmt.Sprintf(
