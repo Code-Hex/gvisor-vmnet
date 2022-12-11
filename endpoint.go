@@ -31,6 +31,8 @@ type endpoint struct {
 	// addr is the MAC address of the endpoint.
 	addr tcpip.LinkAddress
 
+	subnet tcpip.Subnet
+
 	dispatcher stack.NetworkDispatcher
 
 	// wg keeps track of running goroutines.
@@ -52,6 +54,7 @@ type endpoint struct {
 type gatewayEndpointOption struct {
 	MTU           uint32
 	Address       tcpip.LinkAddress
+	Subnet        tcpip.Subnet
 	Writer        *os.File
 	ClosedFunc    func(tcpip.Address, error)
 	Pool          *bytePool
@@ -65,6 +68,7 @@ func newGatewayEndpoint(opts gatewayEndpointOption) (*endpoint, error) {
 		mtu:           opts.MTU,
 		closed:        opts.ClosedFunc,
 		addr:          opts.Address,
+		subnet:        opts.Subnet,
 		pool:          opts.Pool,
 		logger:        opts.Logger,
 		dhcpv4Handler: opts.DHCPv4Handler,
@@ -276,7 +280,12 @@ func (e *endpoint) deliverOrConsumeNetworkPacket(
 	switch ipv4.TransportProtocol() {
 	case header.ICMPv4ProtocolNumber:
 		{
-			icmpv4 := header.ICMPv4(data[header.EthernetMinimumSize+header.IPv4MinimumSize:])
+			// Deliver packets to the created network stack.
+			if e.subnet.Contains(ipv4.DestinationAddress()) {
+				e.dispatcher.DeliverNetworkPacket(ethHdr.Type(), pkt)
+				return true, nil
+			}
+
 			// Only ICMPv4 echo request is emulated on the Go side.
 			//
 			// sudo privilege is required to use ICMP packets. So gvisor
@@ -284,8 +293,7 @@ func (e *endpoint) deliverOrConsumeNetworkPacket(
 			// looks at the contents of the packets and converts them to
 			// echo requests using UDP. The result is converted to ICMPv4
 			// packet, which is then passed to the guest.
-			//
-			// TODO(codehex): add handling for subnet to pass deliver network.
+			icmpv4 := header.ICMPv4(data[header.EthernetMinimumSize+header.IPv4MinimumSize:])
 			if icmpv4.Type() == header.ICMPv4Echo {
 				tmp := icmpv4.Payload()
 				payload := make([]byte, len(tmp))
@@ -308,6 +316,9 @@ func (e *endpoint) deliverOrConsumeNetworkPacket(
 			udpv4 := header.UDP(data[header.EthernetMinimumSize+header.IPv4MinimumSize:])
 			srcPort := udpv4.SourcePort()
 			dstPort := udpv4.DestinationPort()
+
+			// In order to ensure IP address allocation here, DHCP broadcast responses
+			// are made to the connection associated with each IP address.
 			if dstPort == 67 && srcPort == 68 {
 				msg, err := dhcpv4.FromBytes(udpv4.Payload())
 				if err != nil {

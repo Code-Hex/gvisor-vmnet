@@ -63,9 +63,17 @@ func newGateway(hwAddr net.HardwareAddr, opt *gatewayOption) (*Gateway, error) {
 	if err := opt.dnsConfigTidy(gatewayIP); err != nil {
 		return nil, err
 	}
+	tcpipSubnet, tcpipErr := tcpip.NewSubnet(
+		tcpip.Address(opt.Subnet.IP),
+		tcpip.AddressMask(opt.Subnet.Mask),
+	)
+	if tcpipErr != nil {
+		return nil, fmt.Errorf(tcpipErr.Error())
+	}
 	ep, err := newGatewayEndpoint(gatewayEndpointOption{
 		MTU:     opt.MTU,
 		Address: tcpip.LinkAddress(hwAddr),
+		Subnet:  tcpipSubnet,
 		ClosedFunc: func(ipAddr tcpip.Address, err error) {
 			opt.Logger.Error(
 				"closed ehternet endpoint", err,

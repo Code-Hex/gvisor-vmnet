@@ -158,33 +158,14 @@ func New(cidr string, opts ...NetworkOpts) (*Network, error) {
 		return nil, err
 	}
 
-	tcpipSubnet, tcpipErr := tcpip.NewSubnet(
-		tcpip.Address(subnet.IP),
-		tcpip.AddressMask(subnet.Mask),
-	)
-	if tcpipErr != nil {
-		return nil, fmt.Errorf(tcpipErr.Error())
-	}
 	s, err := createNetworkStack(gw.endpoint)
 	if err != nil {
 		return nil, err
 	}
 
-	s.AddRoute(tcpip.Route{
-		Destination: tcpipSubnet,
-		NIC:         nicID,
-	})
-
 	gatewayIPv4 := tcpip.Address(gw.ipv4)
 	if err := addAddress(s, gatewayIPv4); err != nil {
 		return nil, err
-	}
-
-	for _, v := range []tcpip.Address{
-		tcpip.Address(net.ParseIP("192.168.127.2").To4()),
-		tcpip.Address(net.ParseIP("192.168.127.3").To4()),
-	} {
-		log.Println("testtest,", tcpipSubnet.Contains(v))
 	}
 
 	nt := &Network{
@@ -194,7 +175,7 @@ func New(cidr string, opts ...NetworkOpts) (*Network, error) {
 		tcpReceiveBufferSize: opt.TCPReceiveBufferSize,
 		logger:               opt.Logger,
 		gateway:              gw,
-		subnet:               tcpipSubnet,
+		subnet:               gw.endpoint.subnet,
 	}
 
 	// err = gw.serveDHCP4Server(s, parsedSubnet.Mask, &tcpip.FullAddress{
