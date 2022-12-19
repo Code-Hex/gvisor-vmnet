@@ -11,7 +11,7 @@ require (
 	golang.org/x/exp v0.0.0-20221126150942-6ab00d035af9
 	golang.org/x/net v0.2.0
 	golang.org/x/sync v0.1.0
-	gvisor.dev/gvisor v0.0.0-20220817001344-846276b3dbc5
+	gvisor.dev/gvisor v0.0.0-20221216231429-a78e892a26d2
 )
 
 require (

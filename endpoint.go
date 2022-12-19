@@ -137,7 +137,7 @@ func (e *endpoint) ARPHardwareType() header.ARPHardwareType {
 }
 
 // AddHeader implements stack.LinkEndpoint.AddHeader.
-func (e *endpoint) AddHeader(pkt *stack.PacketBuffer) {
+func (e *endpoint) AddHeader(pkt stack.PacketBufferPtr) {
 	// Add ethernet header if needed.
 	eth := header.Ethernet(pkt.LinkHeader().Push(header.EthernetMinimumSize))
 	eth.Encode(&header.EthernetFields{
@@ -184,7 +184,7 @@ func (e *endpoint) dispatchLoop(devAddr tcpip.Address, conn net.Conn) {
 
 // writePacket writes outbound packets to the connection. If it is not
 // currently writable, the packet is dropped.
-func (e *endpoint) writePacket(pkt *stack.PacketBuffer) tcpip.Error {
+func (e *endpoint) writePacket(pkt stack.PacketBufferPtr) tcpip.Error {
 	data := pkt.ToView().AsSlice()
 
 	if e.writer != nil {
@@ -259,7 +259,7 @@ func (e *endpoint) inboundDispatch(devAddr tcpip.Address, conn net.Conn) (bool, 
 }
 
 func (e *endpoint) deliverOrConsumeNetworkPacket(
-	pkt *stack.PacketBuffer,
+	pkt stack.PacketBufferPtr,
 	conn net.Conn,
 ) (bool, error) {
 	hdr, ok := pkt.LinkHeader().Consume(int(e.MaxHeaderLength()))
