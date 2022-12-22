@@ -9,6 +9,7 @@ import (
 
 	"github.com/insomniacslk/dhcp/dhcpv4"
 	"gvisor.dev/gvisor/pkg/tcpip"
+	"gvisor.dev/gvisor/pkg/tcpip/checksum"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
@@ -115,7 +116,7 @@ func makeUDPv4Packet(
 	// Calculate the UDP pseudo-header checksum.
 	xsum := header.PseudoHeaderChecksum(udp.ProtocolNumber, srcIP, dstIP, uint16(len(udpv4)))
 	// Calculate the UDP checksum and set it.
-	xsum = header.Checksum(payload, xsum)
+	xsum = checksum.Checksum(payload, xsum)
 	udpv4.SetChecksum(^udpv4.CalculateChecksum(xsum))
 
 	return buf

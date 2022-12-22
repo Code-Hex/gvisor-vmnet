@@ -8,6 +8,7 @@ import (
 	xicmp "golang.org/x/net/icmp"
 	xipv4 "golang.org/x/net/ipv4"
 	"gvisor.dev/gvisor/pkg/tcpip"
+	"gvisor.dev/gvisor/pkg/tcpip/checksum"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/icmp"
@@ -129,7 +130,7 @@ func makeICMPv4EchoPacket(
 	icmpv4.SetSequence(sequence)
 	copy(icmpv4.Payload(), payload)
 	icmpv4.SetChecksum(0)
-	icmpv4.SetChecksum(^header.Checksum(icmpv4, 0))
+	icmpv4.SetChecksum(^checksum.Checksum(icmpv4, 0))
 
 	return buf
 }
