@@ -22,11 +22,9 @@ import (
 type endpoint struct {
 	// conn is the set of connection each identifying one inbound/outbound
 	// channel.
-	conns map[tcpip.Address]net.Conn
+	conns sync.Map // map[tcpip.Address]net.Conn
 
 	arpTable sync.Map // map[tcpip.Address]tcpip.LinkAddress
-
-	connmu sync.RWMutex
 
 	// mtu (maximum transmission unit) is the maximum size of a packet.
 	mtu uint32
@@ -54,6 +52,18 @@ type endpoint struct {
 	dhcpv4Handler *dhcpHandler
 }
 
+func (e *endpoint) addIPConn(ipAddr tcpip.Address, conn net.Conn) {
+	e.conns.Store(ipAddr, conn)
+}
+
+func (e *endpoint) lookupConn(ipAddr tcpip.Address) (net.Conn, bool) {
+	v, ok := e.conns.Load(ipAddr)
+	if !ok {
+		return nil, false
+	}
+	return v.(net.Conn), true
+}
+
 func (e *endpoint) addIPLink(ipAddr tcpip.Address, hwAddr tcpip.LinkAddress) {
 	e.arpTable.Store(ipAddr, hwAddr)
 }
@@ -79,7 +89,7 @@ type gatewayEndpointOption struct {
 
 func newGatewayEndpoint(opts gatewayEndpointOption) (*endpoint, error) {
 	ep := &endpoint{
-		conns:         map[tcpip.Address]net.Conn{},
+		conns:         sync.Map{},
 		arpTable:      sync.Map{},
 		mtu:           opts.MTU,
 		closed:        opts.ClosedFunc,
@@ -99,10 +109,7 @@ func newGatewayEndpoint(opts gatewayEndpointOption) (*endpoint, error) {
 }
 
 func (e *endpoint) RegisterConn(ipAddr tcpip.Address, hwAddr tcpip.LinkAddress, conn net.Conn) {
-	e.connmu.Lock()
-	e.conns[ipAddr] = conn
-	e.connmu.Unlock()
-
+	e.addIPConn(ipAddr, conn)
 	e.addIPLink(ipAddr, hwAddr)
 
 	// Link endpoints are not savable. When transportation endpoints are
@@ -184,16 +191,13 @@ func (e *endpoint) Attach(dispatcher stack.NetworkDispatcher) {
 
 // dispatchLoop reads packets from the file descriptor in a loop and dispatches
 // them to the network stack.
-func (e *endpoint) dispatchLoop(devAddr tcpip.Address, conn net.Conn) {
+func (e *endpoint) dispatchLoop(ipAddr tcpip.Address, conn net.Conn) {
 	for {
-		cont, err := e.inboundDispatch(devAddr, conn)
+		cont, err := e.inboundDispatch(ipAddr, conn)
 		if err != nil || !cont {
-			e.connmu.Lock()
-			delete(e.conns, devAddr)
-			e.connmu.Unlock()
-
+			e.conns.Delete(ipAddr)
 			if e.closed != nil {
-				e.closed(devAddr, err)
+				e.closed(ipAddr, err)
 			}
 			return
 		}
@@ -213,9 +217,7 @@ func (e *endpoint) writePacket(pkt stack.PacketBufferPtr) tcpip.Error {
 		}, data)
 	}
 
-	e.connmu.RLock()
-	conn, ok := e.conns[pkt.EgressRoute.RemoteAddress]
-	e.connmu.RUnlock()
+	conn, ok := e.lookupConn(pkt.EgressRoute.RemoteAddress)
 	if ok {
 		if _, err := conn.Write(data); err != nil {
 			e.logger.Warn("failed to write packet data in endpoint", errAttr(err))
@@ -224,11 +226,10 @@ func (e *endpoint) writePacket(pkt stack.PacketBufferPtr) tcpip.Error {
 		return nil
 	}
 
-	e.connmu.RLock()
-	defer e.connmu.RUnlock()
-	for _, conn := range e.conns {
-		conn.Write(data)
-	}
+	e.conns.Range(func(_, v any) bool {
+		v.(net.Conn).Write(data)
+		return true
+	})
 	return nil
 }
 
