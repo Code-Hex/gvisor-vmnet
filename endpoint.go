@@ -14,6 +14,7 @@ import (
 	"gvisor.dev/gvisor/pkg/bufferv2"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
+	"gvisor.dev/gvisor/pkg/tcpip/network/arp"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
@@ -22,6 +23,8 @@ type endpoint struct {
 	// conn is the set of connection each identifying one inbound/outbound
 	// channel.
 	conns map[tcpip.Address]net.Conn
+
+	arpTable sync.Map // map[tcpip.Address]tcpip.LinkAddress
 
 	connmu sync.RWMutex
 
@@ -51,6 +54,18 @@ type endpoint struct {
 	dhcpv4Handler *dhcpHandler
 }
 
+func (e *endpoint) addIPLink(ipAddr tcpip.Address, hwAddr tcpip.LinkAddress) {
+	e.arpTable.Store(ipAddr, hwAddr)
+}
+
+func (e *endpoint) lookupIP(ipAddr tcpip.Address) (tcpip.LinkAddress, bool) {
+	v, ok := e.arpTable.Load(ipAddr)
+	if !ok {
+		return "", false
+	}
+	return v.(tcpip.LinkAddress), true
+}
+
 type gatewayEndpointOption struct {
 	MTU           uint32
 	Address       tcpip.LinkAddress
@@ -65,6 +80,7 @@ type gatewayEndpointOption struct {
 func newGatewayEndpoint(opts gatewayEndpointOption) (*endpoint, error) {
 	ep := &endpoint{
 		conns:         map[tcpip.Address]net.Conn{},
+		arpTable:      sync.Map{},
 		mtu:           opts.MTU,
 		closed:        opts.ClosedFunc,
 		addr:          opts.Address,
@@ -82,10 +98,12 @@ func newGatewayEndpoint(opts gatewayEndpointOption) (*endpoint, error) {
 	return ep, nil
 }
 
-func (e *endpoint) RegisterConn(devAddr tcpip.Address, conn net.Conn) {
+func (e *endpoint) RegisterConn(ipAddr tcpip.Address, hwAddr tcpip.LinkAddress, conn net.Conn) {
 	e.connmu.Lock()
-	e.conns[devAddr] = conn
+	e.conns[ipAddr] = conn
 	e.connmu.Unlock()
+
+	e.addIPLink(ipAddr, hwAddr)
 
 	// Link endpoints are not savable. When transportation endpoints are
 	// saved, they stop sending outgoing packets and all incoming packets
@@ -93,7 +111,7 @@ func (e *endpoint) RegisterConn(devAddr tcpip.Address, conn net.Conn) {
 	if e.dispatcher != nil {
 		e.wg.Add(1)
 		go func() {
-			e.dispatchLoop(devAddr, conn)
+			e.dispatchLoop(ipAddr, conn)
 			e.wg.Done()
 		}()
 	}
@@ -268,13 +286,59 @@ func (e *endpoint) deliverOrConsumeNetworkPacket(
 	}
 	ethHdr := header.Ethernet(hdr)
 
-	data := pkt.ToView().AsSlice()
-
-	if ethHdr.Type() != ipv4.ProtocolNumber {
+	switch ethHdr.Type() {
+	case arp.ProtocolNumber:
+		return e.deliverOrConsumeARPPacket(ethHdr, pkt, conn)
+	case ipv4.ProtocolNumber:
+		return e.deliverOrConsumeIPv4Packet(ethHdr, pkt, conn)
+	default:
 		e.dispatcher.DeliverNetworkPacket(ethHdr.Type(), pkt)
 		return true, nil
 	}
+}
 
+func (e *endpoint) deliverOrConsumeARPPacket(
+	ethHdr header.Ethernet,
+	pkt stack.PacketBufferPtr,
+	conn net.Conn,
+) (bool, error) {
+	data := pkt.ToView().AsSlice()
+	req := header.ARP(data[header.EthernetMinimumSize:])
+	if req.IsValid() && req.Op() == header.ARPRequest {
+		target := req.ProtocolAddressTarget()
+
+		linkAddr, ok := e.lookupIP(tcpip.Address(target))
+		if ok {
+			buf := make([]byte, header.EthernetMinimumSize+header.ARPSize)
+			eth := header.Ethernet(buf)
+			eth.Encode(&header.EthernetFields{
+				SrcAddr: linkAddr,
+				DstAddr: tcpip.LinkAddress(req.HardwareAddressSender()),
+				Type:    header.ARPProtocolNumber,
+			})
+			res := header.ARP(buf[header.EthernetMinimumSize:])
+			res.SetIPv4OverEthernet()
+			res.SetOp(header.ARPReply)
+
+			copy(res.HardwareAddressSender(), linkAddr)
+			copy(res.ProtocolAddressSender(), req.ProtocolAddressTarget())
+			copy(res.HardwareAddressTarget(), req.HardwareAddressSender())
+			copy(res.ProtocolAddressTarget(), req.ProtocolAddressSender())
+
+			conn.Write(buf)
+			return true, nil
+		}
+	}
+	e.dispatcher.DeliverNetworkPacket(ethHdr.Type(), pkt)
+	return true, nil
+}
+
+func (e *endpoint) deliverOrConsumeIPv4Packet(
+	ethHdr header.Ethernet,
+	pkt stack.PacketBufferPtr,
+	conn net.Conn,
+) (bool, error) {
+	data := pkt.ToView().AsSlice()
 	ipv4 := header.IPv4(data[header.EthernetMinimumSize:])
 
 	switch ipv4.TransportProtocol() {

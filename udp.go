@@ -19,8 +19,6 @@ func (nt *Network) setUDPForwarder() {
 	udpForwarder := udp.NewForwarder(nt.stack, func(fr *udp.ForwarderRequest) {
 		id := fr.ID()
 
-		addAddress(nt.stack, id.LocalAddress)
-
 		relay := fmt.Sprintf(
 			"%s:%d <-> %s:%d",
 			id.LocalAddress.String(), id.LocalPort,

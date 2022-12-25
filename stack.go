@@ -85,19 +85,3 @@ func createBaseNetStack() (*stack.Stack, error) {
 
 	return s, nil
 }
-
-// used in TCP, UDP relay
-func addAddress(s *stack.Stack, ip tcpip.Address) error {
-	protoAddr := tcpip.ProtocolAddress{
-		Protocol:          ipv4.ProtocolNumber,
-		AddressWithPrefix: ip.WithPrefix(),
-	}
-	tcpipErr := s.AddProtocolAddress(nicID, protoAddr, stack.AddressProperties{
-		PEB:        stack.CanBePrimaryEndpoint,
-		ConfigType: stack.AddressConfigStatic,
-	})
-	if tcpipErr != nil {
-		return fmt.Errorf("failed to add protocol address (%v): %v", ip, tcpipErr)
-	}
-	return nil
-}

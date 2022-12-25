@@ -2,7 +2,6 @@ package vmnet
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"strconv"
@@ -164,9 +163,6 @@ func New(cidr string, opts ...NetworkOpts) (*Network, error) {
 	}
 
 	gatewayIPv4 := tcpip.Address(gw.ipv4)
-	if err := addAddress(s, gatewayIPv4); err != nil {
-		return nil, err
-	}
 
 	nt := &Network{
 		stack:                s,
@@ -177,14 +173,6 @@ func New(cidr string, opts ...NetworkOpts) (*Network, error) {
 		gateway:              gw,
 		subnet:               gw.endpoint.subnet,
 	}
-
-	// err = gw.serveDHCP4Server(s, parsedSubnet.Mask, &tcpip.FullAddress{
-	// 	NIC:  nicID,
-	// 	Port: 67,
-	// })
-	// if err != nil {
-	// 	return nil, err
-	// }
 
 	err = gw.serveDNS4Server(s, &tcpip.FullAddress{
 		NIC:  nicID,
@@ -284,6 +272,9 @@ func createNetworkStack(ep stack.LinkEndpoint) (*stack.Stack, error) {
 	// Enable to forward transport layer data.
 	s.SetPromiscuousMode(nicID, true)
 
+	// Enable to allow endpoints to bind to any address in the NIC.
+	s.SetSpoofing(nicID, true)
+
 	return s, nil
 }
 
@@ -363,11 +354,11 @@ func (nt *Network) NewLinkDevice(hwAddr net.HardwareAddr, opts ...LinkDeviceOpts
 	}
 
 	deviceIPv4Addr := tcpip.Address(deviceIPv4.To4())
-	nt.gateway.endpoint.RegisterConn(deviceIPv4Addr, ethConn)
-
-	if err := addAddress(nt.stack, deviceIPv4Addr); err != nil {
-		log.Println("=========", err)
-	}
+	nt.gateway.endpoint.RegisterConn(
+		deviceIPv4Addr,
+		tcpip.LinkAddress(hwAddr),
+		ethConn,
+	)
 
 	for hostPort, guestPort := range o.TCPIncomingForward {
 		err := nt.tcpIncomingForward(deviceIPv4, guestPort, hostPort)

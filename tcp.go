@@ -22,8 +22,6 @@ func (nt *Network) setTCPForwarder() {
 		func(fr *tcp.ForwarderRequest) {
 			id := fr.ID()
 
-			addAddress(nt.stack, id.LocalAddress)
-
 			relay := fmt.Sprintf(
 				"%s:%d <-> %s:%d",
 				id.LocalAddress.String(), id.LocalPort,
