@@ -22,9 +22,9 @@ import (
 type endpoint struct {
 	// conn is the set of connection each identifying one inbound/outbound
 	// channel.
-	conns sync.Map // map[tcpip.Address]net.Conn
+	conns syncmap[tcpip.Address, net.Conn]
 
-	arpTable sync.Map // map[tcpip.Address]tcpip.LinkAddress
+	arpTable syncmap[tcpip.Address, tcpip.LinkAddress]
 
 	// mtu (maximum transmission unit) is the maximum size of a packet.
 	mtu uint32
@@ -52,30 +52,6 @@ type endpoint struct {
 	dhcpv4Handler *dhcpHandler
 }
 
-func (e *endpoint) addIPConn(ipAddr tcpip.Address, conn net.Conn) {
-	e.conns.Store(ipAddr, conn)
-}
-
-func (e *endpoint) lookupConn(ipAddr tcpip.Address) (net.Conn, bool) {
-	v, ok := e.conns.Load(ipAddr)
-	if !ok {
-		return nil, false
-	}
-	return v.(net.Conn), true
-}
-
-func (e *endpoint) addIPLink(ipAddr tcpip.Address, hwAddr tcpip.LinkAddress) {
-	e.arpTable.Store(ipAddr, hwAddr)
-}
-
-func (e *endpoint) lookupIP(ipAddr tcpip.Address) (tcpip.LinkAddress, bool) {
-	v, ok := e.arpTable.Load(ipAddr)
-	if !ok {
-		return "", false
-	}
-	return v.(tcpip.LinkAddress), true
-}
-
 type gatewayEndpointOption struct {
 	MTU           uint32
 	Address       tcpip.LinkAddress
@@ -89,8 +65,8 @@ type gatewayEndpointOption struct {
 
 func newGatewayEndpoint(opts gatewayEndpointOption) (*endpoint, error) {
 	ep := &endpoint{
-		conns:         sync.Map{},
-		arpTable:      sync.Map{},
+		conns:         newSyncmap[tcpip.Address, net.Conn](),
+		arpTable:      newSyncmap[tcpip.Address, tcpip.LinkAddress](),
 		mtu:           opts.MTU,
 		closed:        opts.ClosedFunc,
 		addr:          opts.Address,
@@ -105,12 +81,13 @@ func newGatewayEndpoint(opts gatewayEndpointOption) (*endpoint, error) {
 			return nil, err
 		}
 	}
+	ep.arpTable.Store(tcpip.Address(net.ParseIP("192.168.127.1")), opts.Address)
 	return ep, nil
 }
 
 func (e *endpoint) RegisterConn(ipAddr tcpip.Address, hwAddr tcpip.LinkAddress, conn net.Conn) {
-	e.addIPConn(ipAddr, conn)
-	e.addIPLink(ipAddr, hwAddr)
+	e.conns.Store(ipAddr, conn)
+	e.arpTable.Store(ipAddr, hwAddr)
 
 	// Link endpoints are not savable. When transportation endpoints are
 	// saved, they stop sending outgoing packets and all incoming packets
@@ -217,7 +194,7 @@ func (e *endpoint) writePacket(pkt stack.PacketBufferPtr) tcpip.Error {
 		}, data)
 	}
 
-	conn, ok := e.lookupConn(pkt.EgressRoute.RemoteAddress)
+	conn, ok := e.conns.Load(pkt.EgressRoute.RemoteAddress)
 	if ok {
 		if _, err := conn.Write(data); err != nil {
 			e.logger.Warn("failed to write packet data in endpoint", errAttr(err))
@@ -226,8 +203,8 @@ func (e *endpoint) writePacket(pkt stack.PacketBufferPtr) tcpip.Error {
 		return nil
 	}
 
-	e.conns.Range(func(_, v any) bool {
-		v.(net.Conn).Write(data)
+	e.conns.Range(func(_ tcpip.Address, v net.Conn) bool {
+		v.Write(data)
 		return true
 	})
 	return nil
@@ -308,7 +285,7 @@ func (e *endpoint) deliverOrConsumeARPPacket(
 	if req.IsValid() && req.Op() == header.ARPRequest {
 		target := req.ProtocolAddressTarget()
 
-		linkAddr, ok := e.lookupIP(tcpip.Address(target))
+		linkAddr, ok := e.arpTable.Load(tcpip.Address(target))
 		if ok {
 			buf := make([]byte, header.EthernetMinimumSize+header.ARPSize)
 			eth := header.Ethernet(buf)
