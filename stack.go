@@ -36,12 +36,34 @@ func createBaseNetStack() (*stack.Stack, error) {
 		f    func(*stack.Stack) tcpip.Error
 	}{
 		{
-			name: "Enable SACK Recovery",
+			name: "Enable SACK",
 			f: func(s *stack.Stack) tcpip.Error {
 				opt := tcpip.TCPSACKEnabled(true)
 				return s.SetTransportProtocolOption(tcp.ProtocolNumber, &opt)
 			},
 		},
+		// {
+		// 	name: "Set reno congestion control",
+		// 	f: func(s *stack.Stack) tcpip.Error {
+		// 		opt := tcpip.CongestionControlOption("cubic") // "reno" or "cubic"
+		// 		return s.SetTransportProtocolOption(tcp.ProtocolNumber, &opt)
+		// 	},
+		// },
+		// {
+		// 	// https://gvisor.dev/blog/2021/08/31/gvisor-rack/
+		// 	name: "Enable RACK Recovery",
+		// 	f: func(s *stack.Stack) tcpip.Error {
+		// 		opt := tcpip.TCPRACKLossDetection
+		// 		return s.SetTransportProtocolOption(tcp.ProtocolNumber, &opt)
+		// 	},
+		// },
+		// {
+		// 	name: "Disable TCP Delay",
+		// 	f: func(s *stack.Stack) tcpip.Error {
+		// 		opt := tcpip.TCPDelayEnabled(false)
+		// 		return s.SetTransportProtocolOption(tcp.ProtocolNumber, &opt)
+		// 	},
+		// },
 		{
 			name: "Enable Receive Buffer Auto-Tuning",
 			f: func(s *stack.Stack) tcpip.Error {
@@ -84,4 +106,20 @@ func createBaseNetStack() (*stack.Stack, error) {
 	}
 
 	return s, nil
+}
+
+// used in TCP, UDP relay
+func addAddress(s *stack.Stack, ip tcpip.Address) error {
+	protoAddr := tcpip.ProtocolAddress{
+		Protocol:          ipv4.ProtocolNumber,
+		AddressWithPrefix: ip.WithPrefix(),
+	}
+	tcpipErr := s.AddProtocolAddress(nicID, protoAddr, stack.AddressProperties{
+		PEB:        stack.CanBePrimaryEndpoint,
+		ConfigType: stack.AddressConfigStatic,
+	})
+	if tcpipErr != nil {
+		return fmt.Errorf("failed to add protocol address (%v): %v", ip, tcpipErr)
+	}
+	return nil
 }

@@ -98,11 +98,13 @@ func (b *bytePool) udpRelay(
 			return
 		}
 		if err != nil && !errors.Is(err, net.ErrClosed) {
-			logger.Info(
-				"failed to read packet",
-				errAttr(err),
-				slog.String("from", srcAddr.String()),
-			)
+			if srcAddr != nil {
+				logger.Info(
+					"failed to read packet",
+					errAttr(err),
+					slog.String("from", srcAddr.String()),
+				)
+			}
 			return
 		}
 

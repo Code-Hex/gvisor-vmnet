@@ -43,7 +43,8 @@ type endpoint struct {
 	// its end of the communication pipe.
 	closed func(tcpip.Address, error)
 
-	writer *pcapgo.Writer
+	writer  *pcapgo.Writer
+	snapLen int
 
 	pool *bytePool
 
@@ -77,11 +78,11 @@ func newGatewayEndpoint(opts gatewayEndpointOption) (*endpoint, error) {
 	}
 	if opts.Writer != nil {
 		ep.writer = pcapgo.NewWriter(opts.Writer)
-		if err := ep.writer.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
+		ep.snapLen = 65536
+		if err := ep.writer.WriteFileHeader(uint32(ep.snapLen), layers.LinkTypeEthernet); err != nil {
 			return nil, err
 		}
 	}
-	ep.arpTable.Store(tcpip.Address(net.ParseIP("192.168.127.1")), opts.Address)
 	return ep, nil
 }
 
@@ -187,10 +188,11 @@ func (e *endpoint) writePacket(pkt stack.PacketBufferPtr) tcpip.Error {
 	data := pkt.ToView().AsSlice()
 
 	if e.writer != nil {
+		packetSize := pkt.Size()
 		e.writer.WritePacket(gopacket.CaptureInfo{
 			Timestamp:     time.Now(),
-			CaptureLength: len(data),
-			Length:        len(data),
+			CaptureLength: e.captureLength(packetSize),
+			Length:        packetSize,
 		}, data)
 	}
 
@@ -227,6 +229,13 @@ func (e *endpoint) WritePackets(pkts stack.PacketBufferList) (written int, err t
 	return written, err
 }
 
+func (e *endpoint) captureLength(packetSize int) int {
+	if packetSize < e.snapLen {
+		return packetSize
+	}
+	return e.snapLen
+}
+
 // dispatch reads one packet from the file descriptor and dispatches it.
 func (e *endpoint) inboundDispatch(devAddr tcpip.Address, conn net.Conn) (bool, error) {
 	data := e.pool.getBytes()
@@ -240,7 +249,7 @@ func (e *endpoint) inboundDispatch(devAddr tcpip.Address, conn net.Conn) (bool, 
 	if e.writer != nil {
 		e.writer.WritePacket(gopacket.CaptureInfo{
 			Timestamp:     time.Now(),
-			CaptureLength: n,
+			CaptureLength: e.captureLength(n),
 			Length:        n,
 		}, data[:n])
 	}

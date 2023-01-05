@@ -163,6 +163,7 @@ func New(cidr string, opts ...NetworkOpts) (*Network, error) {
 	}
 
 	gatewayIPv4 := tcpip.Address(gw.ipv4)
+	addAddress(s, gatewayIPv4)
 
 	nt := &Network{
 		stack:                s,
@@ -193,7 +194,7 @@ func New(cidr string, opts ...NetworkOpts) (*Network, error) {
 func (nt *Network) Gateway() *Gateway { return nt.gateway }
 
 func (nt *Network) tcpIncomingForward(guestIPv4 net.IP, guestPort, hostPort int) error {
-	ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(hostPort))
+	ln, err := net.Listen("tcp", ":"+strconv.Itoa(hostPort))
 	if err != nil {
 		return err
 	}
