@@ -15,7 +15,7 @@ import (
 	"gvisor.dev/gvisor/pkg/waiter"
 )
 
-func (nt *Network) setUDPForwarder() {
+func (nt *Network) setUDPForwarder(ctx context.Context) {
 	udpForwarder := udp.NewForwarder(nt.stack, func(fr *udp.ForwarderRequest) {
 		id := fr.ID()
 
@@ -63,7 +63,7 @@ func (nt *Network) setUDPForwarder() {
 
 		client := gonet.NewUDPConn(nt.stack, &wq, ep)
 
-		ctx := slog.NewContext(context.Background(), nt.logger)
+		ctx := slog.NewContext(ctx, nt.logger)
 		ctx, cancel := context.WithCancel(ctx)
 
 		idleTimeout := time.Minute
