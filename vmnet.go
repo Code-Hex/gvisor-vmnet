@@ -1,6 +1,7 @@
 package vmnet
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -105,6 +106,7 @@ type Network struct {
 	gateway              *Gateway
 	logger               *slog.Logger
 	subnet               tcpip.Subnet
+	shutdown             func()
 }
 
 // New initializes new network stack with a network gateway.
@@ -165,6 +167,8 @@ func New(cidr string, opts ...NetworkOpts) (*Network, error) {
 	gatewayIPv4 := tcpip.Address(gw.ipv4)
 	addAddress(s, gatewayIPv4)
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	nt := &Network{
 		stack:                s,
 		pool:                 pool,
@@ -173,9 +177,10 @@ func New(cidr string, opts ...NetworkOpts) (*Network, error) {
 		logger:               opt.Logger,
 		gateway:              gw,
 		subnet:               gw.endpoint.subnet,
+		shutdown:             cancel,
 	}
 
-	err = gw.serveDNS4Server(s, &tcpip.FullAddress{
+	err = gw.serveDNS4Server(ctx, s, &tcpip.FullAddress{
 		NIC:  nicID,
 		Addr: gatewayIPv4,
 		Port: 53,
@@ -184,19 +189,24 @@ func New(cidr string, opts ...NetworkOpts) (*Network, error) {
 		return nil, err
 	}
 
-	nt.setUDPForwarder()
-	nt.setTCPForwarder()
+	nt.setUDPForwarder(ctx)
+	nt.setTCPForwarder(ctx)
 
 	return nt, nil
+}
+
+func (nt *Network) Shutdown() {
+	nt.stack.Destroy()
+	nt.shutdown()
 }
 
 // Gateway returns default gateway in this network stack.
 func (nt *Network) Gateway() *Gateway { return nt.gateway }
 
-func (nt *Network) tcpIncomingForward(guestIPv4 net.IP, guestPort, hostPort int) error {
+func (nt *Network) tcpIncomingForward(guestIPv4 net.IP, guestPort, hostPort int) (func() error, error) {
 	ln, err := net.Listen("tcp", ":"+strconv.Itoa(hostPort))
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	proxy := fmt.Sprintf(
@@ -249,7 +259,7 @@ func (nt *Network) tcpIncomingForward(guestIPv4 net.IP, guestPort, hostPort int)
 		}
 	}()
 
-	return nil
+	return ln.Close, nil
 }
 
 func createNetworkStack(ep stack.LinkEndpoint) (*stack.Stack, error) {
@@ -284,7 +294,7 @@ type LinkDevice struct {
 	dev       *os.File
 	ipv4      net.IP
 	hwAddress net.HardwareAddr
-	closeFunc func()
+	closeFunc func() error
 	pool      *bytePool
 }
 
@@ -339,30 +349,31 @@ func (nt *Network) NewLinkDevice(hwAddr net.HardwareAddr, opts ...LinkDeviceOpts
 	if err != nil {
 		return nil, fmt.Errorf("failed to create socket pair: %w", err)
 	}
-	closeIfErr := func() {
-		dev.Close()
-		network.Close()
-	}
+	closer := &wrappedConn{closers: []func() error{
+		dev.Close,
+		network.Close,
+	}}
 
 	ethConn, err := net.FileConn(network)
 	if err != nil {
-		closeIfErr()
+		closer.Close()
 		return nil, fmt.Errorf("failed to make a connection: %w", err)
 	}
-	closeIfErr2 := func() {
-		closeIfErr()
-		ethConn.Close()
-	}
+
+	closer.Conn = ethConn
+	closer.closers = append(closer.closers, ethConn.Close)
 
 	deviceIPv4Addr := tcpip.Address(deviceIPv4.To4())
 	nt.gateway.endpoint.RegisterConn(
 		deviceIPv4Addr,
 		tcpip.LinkAddress(hwAddr),
-		ethConn,
+		// we pass the closer with associated ethConn, because then if the endpoint
+		// is destroyed, everything is closed along with it
+		closer,
 	)
 
 	for hostPort, guestPort := range o.TCPIncomingForward {
-		err := nt.tcpIncomingForward(deviceIPv4, guestPort, hostPort)
+		close, err := nt.tcpIncomingForward(deviceIPv4, guestPort, hostPort)
 		if err != nil {
 			return nil, fmt.Errorf(
 				"failed to listen tcp forward proxy 127.0.0.1:%d <-> %s:%d: %w",
@@ -371,12 +382,14 @@ func (nt *Network) NewLinkDevice(hwAddr net.HardwareAddr, opts ...LinkDeviceOpts
 				err,
 			)
 		}
+
+		closer.closers = append(closer.closers, close)
 	}
 
 	return &LinkDevice{
 		dev:       dev,
 		ipv4:      deviceIPv4,
-		closeFunc: closeIfErr2,
+		closeFunc: closer.Close,
 		pool:      nt.pool,
 		hwAddress: hwAddr,
 	}, nil
@@ -392,4 +405,20 @@ func (l *LinkDevice) IPv4() net.IP { return l.ipv4 }
 func (l *LinkDevice) MACAddress() net.HardwareAddr { return l.hwAddress }
 
 // Close closes this device and LinkDevice connection.
-func (l *LinkDevice) Close() error { l.closeFunc(); return nil }
+func (l *LinkDevice) Close() error { return l.closeFunc() }
+
+type wrappedConn struct {
+	net.Conn
+	closers []func() error
+}
+
+func (mt *wrappedConn) Close() error {
+	var err error
+	for _, c := range mt.closers {
+		if cerr := c(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}
+
+	return err
+}

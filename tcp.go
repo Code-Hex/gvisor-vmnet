@@ -1,6 +1,7 @@
 package vmnet
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -14,7 +15,7 @@ import (
 	"gvisor.dev/gvisor/pkg/waiter"
 )
 
-func (nt *Network) setTCPForwarder() {
+func (nt *Network) setTCPForwarder(ctx context.Context) {
 	tcpForwarder := tcp.NewForwarder(
 		nt.stack,
 		nt.tcpReceiveBufferSize,
@@ -44,7 +45,7 @@ func (nt *Network) setTCPForwarder() {
 			ep.SocketOptions().SetKeepAlive(true)
 
 			remoteAddr := fmt.Sprintf("%s:%d", id.LocalAddress, id.LocalPort)
-			conn, err := nt.dialTCP(id.LocalAddress, id.LocalPort)
+			conn, err := nt.dialTCP(ctx, id.LocalAddress, id.LocalPort)
 			if err != nil {
 				nt.logger.Error(
 					"failed to dial TCP", err,
@@ -53,6 +54,11 @@ func (nt *Network) setTCPForwarder() {
 				)
 				return
 			}
+
+			go func() {
+				<-ctx.Done()
+				conn.Close()
+			}()
 
 			nt.logger.Info(
 				"start TCP relay",
@@ -68,16 +74,18 @@ func (nt *Network) setTCPForwarder() {
 	nt.stack.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpForwarder.HandlePacket)
 }
 
-func (nt *Network) dialTCP(addr tcpip.Address, port uint16) (io.ReadWriteCloser, error) {
+func (nt *Network) dialTCP(ctx context.Context, addr tcpip.Address, port uint16) (io.ReadWriteCloser, error) {
 	if nt.subnet.Contains(addr) {
-		return gonet.DialTCP(nt.stack, tcpip.FullAddress{
+		return gonet.DialContextTCP(ctx, nt.stack, tcpip.FullAddress{
 			NIC:  nicID,
 			Addr: addr,
 			Port: port,
 		}, ipv4.ProtocolNumber)
 	}
 	remoteAddr := fmt.Sprintf("%s:%d", addr, port)
-	conn, err := net.DialTimeout("tcp", remoteAddr, 5*time.Second)
+
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	conn, err := dialer.DialContext(ctx, "tcp", remoteAddr)
 	if err != nil {
 		return nil, err
 	}

@@ -20,18 +20,17 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
 
-func (gw *Gateway) serveDNS4Server(s *stack.Stack, laddr *tcpip.FullAddress) error {
+func (gw *Gateway) serveDNS4Server(ctx context.Context, s *stack.Stack, laddr *tcpip.FullAddress) error {
 	conn, err := dialUDPConn(s, laddr, ipv4.ProtocolNumber)
 	if err != nil {
 		return err
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	cleanup := func() {
+	ctx, cancel := context.WithCancel(ctx)
+	go func() {
+		<-ctx.Done()
 		conn.Close()
-		cancel()
-	}
+	}()
 
 	h := &dnsHandler{
 		resolver: &dnsResolver{
@@ -49,12 +48,18 @@ func (gw *Gateway) serveDNS4Server(s *stack.Stack, laddr *tcpip.FullAddress) err
 	}
 
 	go func() {
-		defer cleanup()
+		defer cancel()
 
 		rbuf := gw.pool.getBytes()
 		defer gw.pool.putBytes(rbuf)
 
 		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
 			n, peer, err := conn.ReadFrom(rbuf)
 			if err != nil {
 				gw.logger.Error("failed to read from connection in DNS server", err)
