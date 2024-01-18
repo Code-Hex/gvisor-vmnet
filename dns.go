@@ -68,7 +68,7 @@ func (gw *Gateway) serveDNS4Server(ctx context.Context, s *stack.Stack, laddr *t
 
 			var msg dns.Msg
 			if err := msg.Unpack(rbuf[:n]); err != nil {
-				gw.logger.Warn("failed parsing DNS request", errAttr(err))
+				gw.logger.Warn("failed parsing DNS request", err)
 				continue
 			}
 
@@ -77,7 +77,7 @@ func (gw *Gateway) serveDNS4Server(ctx context.Context, s *stack.Stack, laddr *t
 			go func() {
 				err := h.handleDNS(conn, &msg, upeer)
 				if err != nil {
-					gw.logger.Warn("failed to handle DNS request", errAttr(err))
+					gw.logger.Warn("failed to handle DNS request", err)
 				}
 			}()
 		}

@@ -1,6 +1,7 @@
 package vmnet
 
 import (
+	"log/slog"
 	"net"
 	"os"
 	"sync"
@@ -10,7 +11,6 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
 	"github.com/insomniacslk/dhcp/dhcpv4"
-	"golang.org/x/exp/slog"
 	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
@@ -199,7 +199,7 @@ func (e *endpoint) writePacket(pkt stack.PacketBufferPtr) tcpip.Error {
 	conn, ok := e.conns.Load(pkt.EgressRoute.RemoteAddress)
 	if ok {
 		if _, err := conn.Write(data); err != nil {
-			e.logger.Warn("failed to write packet data in endpoint", errAttr(err))
+			e.logger.Warn("failed to write packet data in endpoint", err)
 			return &tcpip.ErrInvalidEndpointState{}
 		}
 		return nil
@@ -373,7 +373,7 @@ func (e *endpoint) deliverOrConsumeIPv4Packet(
 			if dstPort == 67 && srcPort == 68 {
 				msg, err := dhcpv4.FromBytes(udpv4.Payload())
 				if err != nil {
-					e.logger.Warn("failed to decode DHCPv4 packet data in endpoint", errAttr(err))
+					e.logger.Warn("failed to decode DHCPv4 packet data in endpoint", err)
 					return true, nil
 				}
 				go e.dhcpv4Handler.handleDHCPv4(conn, dhcpv4Packet{

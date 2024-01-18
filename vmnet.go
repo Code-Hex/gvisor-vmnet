@@ -3,11 +3,11 @@ package vmnet
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"strconv"
 
-	"golang.org/x/exp/slog"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
 	"gvisor.dev/gvisor/pkg/tcpip/header"

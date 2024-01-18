@@ -3,10 +3,10 @@ package vmnet
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"time"
 
-	"golang.org/x/exp/slog"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
@@ -54,7 +54,7 @@ func (nt *Network) setUDPForwarder(ctx context.Context) {
 			if err != nil {
 				nt.logger.Warn(
 					"failed to bind local port",
-					errAttr(err),
+					err,
 					slog.String("between", relay),
 				)
 				return
@@ -63,7 +63,6 @@ func (nt *Network) setUDPForwarder(ctx context.Context) {
 
 		client := gonet.NewUDPConn(&wq, ep)
 
-		ctx := slog.NewContext(ctx, nt.logger)
 		ctx, cancel := context.WithCancel(ctx)
 
 		idleTimeout := time.Minute
@@ -80,11 +79,11 @@ func (nt *Network) setUDPForwarder(ctx context.Context) {
 
 		go func() {
 			defer cancel()
-			nt.pool.udpRelay(ctx, client, clientAddr, proxyConn, cancel, extend) // loc <- remote
+			nt.pool.udpRelay(ctx, nt.logger, client, clientAddr, proxyConn, cancel, extend) // loc <- remote
 		}()
 		go func() {
 			defer cancel()
-			nt.pool.udpRelay(ctx, proxyConn, remoteAddr, client, cancel, extend) // remote <- loc
+			nt.pool.udpRelay(ctx, nt.logger, proxyConn, remoteAddr, client, cancel, extend) // remote <- loc
 		}()
 	})
 	nt.stack.SetTransportProtocolHandler(udp.ProtocolNumber, udpForwarder.HandlePacket)

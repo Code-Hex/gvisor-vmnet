@@ -2,12 +2,12 @@ package vmnet
 
 import (
 	"fmt"
+	"log/slog"
 	"net"
 	"net/netip"
 	"os"
 
 	"github.com/miekg/dns"
-	"golang.org/x/exp/slog"
 	"gvisor.dev/gvisor/pkg/tcpip"
 )
 

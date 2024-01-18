@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"sync"
 
-	"golang.org/x/exp/slog"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -74,6 +74,7 @@ func (b *bytePool) tcpRelay(rw1, rw2 io.ReadWriteCloser) error {
 
 func (b *bytePool) udpRelay(
 	ctx context.Context,
+	logger *slog.Logger,
 	dst net.PacketConn,
 	dstAddr net.Addr,
 	src net.PacketConn,
@@ -83,8 +84,6 @@ func (b *bytePool) udpRelay(
 
 	buf := b.getBytes()
 	defer b.putBytes(buf)
-
-	logger := slog.FromContext(ctx)
 
 	for {
 		select {
@@ -101,7 +100,7 @@ func (b *bytePool) udpRelay(
 			if srcAddr != nil {
 				logger.Info(
 					"failed to read packet",
-					errAttr(err),
+					err,
 					slog.String("from", srcAddr.String()),
 				)
 			}
@@ -112,7 +111,7 @@ func (b *bytePool) udpRelay(
 		if err != nil && !errors.Is(err, net.ErrClosed) {
 			logger.Info(
 				"failed to write packet",
-				errAttr(err),
+				err,
 				slog.String("to", dstAddr.String()),
 			)
 			return
