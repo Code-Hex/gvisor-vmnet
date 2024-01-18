@@ -164,7 +164,7 @@ func New(cidr string, opts ...NetworkOpts) (*Network, error) {
 		return nil, err
 	}
 
-	gatewayIPv4 := tcpip.Address(gw.ipv4)
+	gatewayIPv4 := tcpip.AddrFromSlice(gw.ipv4)
 	addAddress(s, gatewayIPv4)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -237,7 +237,7 @@ func (nt *Network) tcpIncomingForward(guestIPv4 net.IP, guestPort, hostPort int)
 
 				conn1, err := gonet.DialTCP(nt.stack, tcpip.FullAddress{
 					NIC:  nicID,
-					Addr: tcpip.Address(guestIPv4),
+					Addr: tcpip.AddrFromSlice(guestIPv4),
 					Port: uint16(guestPort),
 				}, ipv4.ProtocolNumber)
 				if err != nil {
@@ -363,7 +363,7 @@ func (nt *Network) NewLinkDevice(hwAddr net.HardwareAddr, opts ...LinkDeviceOpts
 	closer.Conn = ethConn
 	closer.closers = append(closer.closers, ethConn.Close)
 
-	deviceIPv4Addr := tcpip.Address(deviceIPv4.To4())
+	deviceIPv4Addr := tcpip.AddrFromSlice(deviceIPv4.To4())
 	nt.gateway.endpoint.RegisterConn(
 		deviceIPv4Addr,
 		tcpip.LinkAddress(hwAddr),

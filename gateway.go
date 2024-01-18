@@ -64,8 +64,8 @@ func newGateway(hwAddr net.HardwareAddr, opt *gatewayOption) (*Gateway, error) {
 		return nil, err
 	}
 	tcpipSubnet, tcpipErr := tcpip.NewSubnet(
-		tcpip.Address(opt.Subnet.IP),
-		tcpip.AddressMask(opt.Subnet.Mask),
+		tcpip.AddrFromSlice(opt.Subnet.IP),
+		tcpip.MaskFromBytes(opt.Subnet.Mask),
 	)
 	if tcpipErr != nil {
 		return nil, fmt.Errorf(tcpipErr.Error())

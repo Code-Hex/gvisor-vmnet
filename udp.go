@@ -41,11 +41,11 @@ func (nt *Network) setUDPForwarder(ctx context.Context) {
 		}
 
 		clientAddr := &net.UDPAddr{
-			IP:   net.IP([]byte(id.RemoteAddress)),
+			IP:   net.IP([]byte(id.RemoteAddress.AsSlice())),
 			Port: int(id.RemotePort),
 		}
 		remoteAddr := &net.UDPAddr{
-			IP:   net.IP([]byte(id.LocalAddress)),
+			IP:   net.IP([]byte(id.LocalAddress.AsSlice())),
 			Port: int(id.LocalPort),
 		}
 
@@ -61,7 +61,7 @@ func (nt *Network) setUDPForwarder(ctx context.Context) {
 			}
 		}
 
-		client := gonet.NewUDPConn(nt.stack, &wq, ep)
+		client := gonet.NewUDPConn(&wq, ep)
 
 		ctx := slog.NewContext(ctx, nt.logger)
 		ctx, cancel := context.WithCancel(ctx)
@@ -97,7 +97,7 @@ func (nt *Network) listenUDP(addr tcpip.Address, port uint16) (net.PacketConn, e
 	}
 	if nt.subnet.Contains(addr) {
 		return gonet.DialUDP(nt.stack, &tcpip.FullAddress{
-			Addr: tcpip.Address(net.IPv4zero),
+			Addr: tcpip.AddrFromSlice(net.IPv4zero),
 			Port: 0, // random port
 		}, nil, ipv4.ProtocolNumber)
 	}
@@ -138,9 +138,9 @@ func dialUDPConn(
 		}
 	}
 
-	return gonet.NewUDPConn(s, &wq, ep), nil
+	return gonet.NewUDPConn(&wq, ep), nil
 }
 
 func fullToUDPAddr(addr tcpip.FullAddress) *net.UDPAddr {
-	return &net.UDPAddr{IP: net.IP(addr.Addr), Port: int(addr.Port)}
+	return &net.UDPAddr{IP: net.IP(addr.Addr.AsSlice()), Port: int(addr.Port)}
 }

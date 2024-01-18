@@ -11,7 +11,7 @@ import (
 	"github.com/google/gopacket/pcapgo"
 	"github.com/insomniacslk/dhcp/dhcpv4"
 	"golang.org/x/exp/slog"
-	"gvisor.dev/gvisor/pkg/bufferv2"
+	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
 	"gvisor.dev/gvisor/pkg/tcpip/network/arp"
@@ -254,7 +254,7 @@ func (e *endpoint) inboundDispatch(devAddr tcpip.Address, conn net.Conn) (bool, 
 		}, data[:n])
 	}
 
-	buf := bufferv2.MakeWithData(data[:n])
+	buf := buffer.MakeWithData(data[:n])
 	pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{
 		Payload: buf,
 	})
@@ -294,7 +294,7 @@ func (e *endpoint) deliverOrConsumeARPPacket(
 	if req.IsValid() && req.Op() == header.ARPRequest {
 		target := req.ProtocolAddressTarget()
 
-		linkAddr, ok := e.arpTable.Load(tcpip.Address(target))
+		linkAddr, ok := e.arpTable.Load(tcpip.AddrFromSlice(target))
 		if ok {
 			buf := make([]byte, header.EthernetMinimumSize+header.ARPSize)
 			eth := header.Ethernet(buf)
@@ -396,3 +396,5 @@ func (e *endpoint) deliverOrConsumeIPv4Packet(
 
 	return true, nil
 }
+
+func (e *endpoint) ParseHeader(stack.PacketBufferPtr) bool { return true }
