@@ -62,8 +62,8 @@ func (h *dhcpHandler) handleDHCPv4(conn io.Writer, p dhcpv4Packet) error {
 	packet := makeUDPv4Packet(
 		p.dstMAC,
 		p.srcMAC,
-		tcpip.Address(h.gatewayIP),
-		tcpip.Address(net.IPv4bcast),
+		tcpip.AddrFromSlice(h.gatewayIP),
+		tcpip.AddrFromSlice(net.IPv4bcast),
 		p.dstPort,
 		p.srcPort,
 		dhcpReply.ToBytes(),

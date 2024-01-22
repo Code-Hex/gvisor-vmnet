@@ -7,21 +7,19 @@ import (
 )
 
 func netaddrIPFromNetstackIP(s tcpip.Address) netip.Addr {
-	switch len(s) {
+	switch len(s.AsSlice()) {
 	case 4:
-		return netip.AddrFrom4([4]byte{s[0], s[1], s[2], s[3]})
+		return netip.AddrFrom4(s.As4())
 	case 16:
-		var a [16]byte
-		copy(a[:], s)
-		return netip.AddrFrom16(a).Unmap()
+		return netip.AddrFrom16(s.As16()).Unmap()
 	}
 	return netip.Addr{}
 }
 
 func ipPortOfNetstackAddr(a tcpip.Address, port uint16) (ipp netip.AddrPort, ok bool) {
 	var a16 [16]byte
-	copy(a16[:], a)
-	switch len(a) {
+	copy(a16[:], a.AsSlice())
+	switch len(a.AsSlice()) {
 	case 4:
 		return netip.AddrPortFrom(
 			netip.AddrFrom4(*(*[4]byte)(a16[:4])).Unmap(),

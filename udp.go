@@ -3,10 +3,10 @@ package vmnet
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"time"
 
-	"golang.org/x/exp/slog"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
@@ -41,11 +41,11 @@ func (nt *Network) setUDPForwarder(ctx context.Context) {
 		}
 
 		clientAddr := &net.UDPAddr{
-			IP:   net.IP([]byte(id.RemoteAddress)),
+			IP:   net.IP([]byte(id.RemoteAddress.AsSlice())),
 			Port: int(id.RemotePort),
 		}
 		remoteAddr := &net.UDPAddr{
-			IP:   net.IP([]byte(id.LocalAddress)),
+			IP:   net.IP([]byte(id.LocalAddress.AsSlice())),
 			Port: int(id.LocalPort),
 		}
 
@@ -54,16 +54,15 @@ func (nt *Network) setUDPForwarder(ctx context.Context) {
 			if err != nil {
 				nt.logger.Warn(
 					"failed to bind local port",
-					errAttr(err),
+					err,
 					slog.String("between", relay),
 				)
 				return
 			}
 		}
 
-		client := gonet.NewUDPConn(nt.stack, &wq, ep)
+		client := gonet.NewUDPConn(&wq, ep)
 
-		ctx := slog.NewContext(ctx, nt.logger)
 		ctx, cancel := context.WithCancel(ctx)
 
 		idleTimeout := time.Minute
@@ -80,11 +79,11 @@ func (nt *Network) setUDPForwarder(ctx context.Context) {
 
 		go func() {
 			defer cancel()
-			nt.pool.udpRelay(ctx, client, clientAddr, proxyConn, cancel, extend) // loc <- remote
+			nt.pool.udpRelay(ctx, nt.logger, client, clientAddr, proxyConn, cancel, extend) // loc <- remote
 		}()
 		go func() {
 			defer cancel()
-			nt.pool.udpRelay(ctx, proxyConn, remoteAddr, client, cancel, extend) // remote <- loc
+			nt.pool.udpRelay(ctx, nt.logger, proxyConn, remoteAddr, client, cancel, extend) // remote <- loc
 		}()
 	})
 	nt.stack.SetTransportProtocolHandler(udp.ProtocolNumber, udpForwarder.HandlePacket)
@@ -97,7 +96,7 @@ func (nt *Network) listenUDP(addr tcpip.Address, port uint16) (net.PacketConn, e
 	}
 	if nt.subnet.Contains(addr) {
 		return gonet.DialUDP(nt.stack, &tcpip.FullAddress{
-			Addr: tcpip.Address(net.IPv4zero),
+			Addr: tcpip.AddrFromSlice(net.IPv4zero),
 			Port: 0, // random port
 		}, nil, ipv4.ProtocolNumber)
 	}
@@ -138,9 +137,9 @@ func dialUDPConn(
 		}
 	}
 
-	return gonet.NewUDPConn(s, &wq, ep), nil
+	return gonet.NewUDPConn(&wq, ep), nil
 }
 
 func fullToUDPAddr(addr tcpip.FullAddress) *net.UDPAddr {
-	return &net.UDPAddr{IP: net.IP(addr.Addr), Port: int(addr.Port)}
+	return &net.UDPAddr{IP: net.IP(addr.Addr.AsSlice()), Port: int(addr.Port)}
 }
